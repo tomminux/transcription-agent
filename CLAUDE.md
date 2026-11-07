@@ -8,7 +8,7 @@ Supported inputs:
 - `.m4a` recorded with QuickTime Player on macOS
 - Audio recorded on iPhone with the Voice Memos app (`.m4a`, possibly shared/AirDropped/synced into the folder)
 
-Target runtime: **macOS on an Intel Mac** (x86_64). Development may happen on Linux, so the code must also build there.
+Target runtime: a **Linux x86_64 container** running on an **Intel Mac** (via Docker Desktop, Colima or Podman). The agent is not meant to run natively on macOS. The audio files live on the Mac and are shared with the container through bind mounts. Development happens on Linux, where the same container can be built and tested.
 
 ## Workflow
 
@@ -30,7 +30,20 @@ Directories (at repo root, contents are gitignored, `.gitkeep` keeps them in git
 - **Audio decoding:** pure Rust where possible: `symphonia` (AAC in MP4/M4A) + resample to 16 kHz mono f32 (e.g. `rubato`) before feeding Whisper.
 - **Folder watching:** `notify` crate. Must also scan the folder at startup for files already present. Wait until a file's size is stable before processing, since Voice Memos/QuickTime/AirDrop may still be writing it.
 - **Output format:** Markdown with YAML front matter (source filename, date, duration, detected language, model) followed by the transcript text.
-- **Background execution:** manual foreground run for now (`cargo run --release`). The binary is a plain foreground process; launchd LaunchAgent packaging is a possible later step, do not build daemonization into the binary.
+- **Background execution:** the agent runs in a container (replaces the earlier "manual run / launchd" plan). The binary stays a plain foreground process (PID 1 in the container); `docker compose up -d` with `restart: unless-stopped` keeps it running in the background and restarts it after a crash or reboot. Do not build daemonization into the binary, and do not add launchd.
+- **Container packaging:** multi-stage `Dockerfile` (Rust builder with `cmake` + C++ toolchain, slim Debian runtime) and a `compose.yaml`. Keep it runtime-agnostic (no Docker-only features) so Docker Desktop, Colima and Podman all work. Build for `linux/amd64`.
+
+## Container constraints (important)
+
+- **Bind mounts:** `compose.yaml` mounts the three folders from the host into the container (e.g. `/data/new-audio-files`, `/data/transcriptions`, `/data/transcribed-audio-files`) and `models/` read-only at `/models`. Models are not baked into the image.
+- **File watching on a Mac host is unreliable:** with Docker Desktop/Colima, changes made on macOS often do not generate inotify events inside the container. The agent must therefore also do a **periodic rescan** of the input folder (e.g. every few seconds, interval configurable) in addition to `notify` events (or use `notify`'s `PollWatcher`). The startup scan already exists. Never rely only on events.
+- **Cross-mount moves:** the input and done folders are separate mounts, so `rename()` fails with `EXDEV`. The mover must fall back to copy + fsync + delete (and only delete the source after a successful copy).
+- **Configuration through environment variables** as well as CLI flags (clap `env`), with container defaults pointing at `/data/...` and `/models/...`.
+- **Permissions:** run as a non-root user; support mapping the host UID/GID (`user:` in compose) so files written to the Mac folders are owned by the Mac user.
+- **CPU build:** do not build the image with `-C target-cpu=native` / host-specific whisper.cpp flags (the build machine may differ from the run machine). Use a portable x86_64 baseline, with AVX2 where safe.
+- **Resources:** Whisper is CPU- and memory-heavy; document the Docker Desktop CPU/RAM limits needed for the chosen model (`base` ~1 GB, `small` ~2 GB).
+- **Logs** go to stdout/stderr (`docker compose logs -f`), not to files.
+- **Graceful shutdown:** handle SIGTERM (container stop). Finish or abandon the current file safely; the audio stays in `new-audio-files/` unless fully processed.
 
 ## Behavior rules
 
@@ -48,9 +61,14 @@ cargo run --release
 cargo test
 cargo fmt --check
 cargo clippy -- -D warnings
+
+docker compose build          # build the linux/amd64 image
+docker compose up -d          # run the agent in the background
+docker compose logs -f        # follow the logs
+docker compose down           # stop it
 ```
 
-Build prerequisites for `whisper-rs`: `cmake` and a C/C++ toolchain (Xcode Command Line Tools on macOS).
+Build prerequisites for `whisper-rs`: `cmake` and a C/C++ toolchain. Inside the container these are provided by the builder stage, so nothing needs to be installed on the Mac except Docker (or Colima/Podman).
 
 ## Conventions
 
@@ -62,4 +80,4 @@ Build prerequisites for `whisper-rs`: `cmake` and a C/C++ toolchain (Xcode Comma
 ## Git
 
 - Repository is private. Commit in small, logical steps with clear messages; commit after each meaningful milestone.
-- Never commit `target/`, `models/`, or the contents of the three audio/transcript folders.
+- Never commit `target/`, `models/`, or the contents of the three audio/transcript folders. Add a `.dockerignore` so these (and `.git`) are never sent to the image build context.
