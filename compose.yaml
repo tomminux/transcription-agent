@@ -17,7 +17,7 @@ services:
     volumes:
       # One parent folder holding new-audio-files/, transcriptions/ and
       # transcribed-audio-files/ (created by the agent if missing).
-      - ${HOST_DATA_DIR:-/Users/paolo/dockerhost-storage/transcription-agent}:/data
+      - ${HOST_DATA_DIR:-/Users/paolo/docker-host-container/transcription-agent}:/data
       - ${HOST_MODELS_DIR:-./models}:/models:ro
     # Whisper is CPU/RAM hungry: give Docker Desktop/Colima enough CPUs and
     # at least ~2 GB RAM for the base model.
