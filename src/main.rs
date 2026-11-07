@@ -1,5 +1,6 @@
 mod config;
 mod decoder;
+mod output;
 mod transcriber;
 mod watcher;
 
@@ -31,7 +32,17 @@ fn main() -> anyhow::Result<()> {
 
     let mut failures = watcher::FailureTracker::default();
 
+    let model_name = config
+        .model
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
     while let Some(path) = queue.next() {
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if failures.should_skip(&path) {
             continue;
         }
@@ -55,15 +66,33 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        // TODO: write the transcription, move the audio file.
-        // Never log transcript text: it is private.
-        tracing::info!(
-            file = %path.display(),
-            duration_secs = audio.duration_secs(),
-            language = %transcript.language,
-            chars = transcript.text.chars().count(),
-            "transcribed (writer/mover not implemented yet)"
-        );
+        let meta = output::Meta {
+            source_name: &file_name,
+            recorded_at: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
+            duration_secs: audio.duration_secs(),
+            model: &model_name,
+        };
+        match output::store_result(
+            &path,
+            &config.output_dir,
+            &config.done_dir,
+            &transcript,
+            &meta,
+        ) {
+            // Never log transcript text: it is private.
+            Ok(md) => tracing::info!(
+                file = %path.display(),
+                transcription = %md.display(),
+                duration_secs = audio.duration_secs(),
+                language = %transcript.language,
+                chars = transcript.text.chars().count(),
+                "transcribed and moved"
+            ),
+            Err(e) => {
+                tracing::error!(file = %path.display(), "saving result failed: {e:#}");
+                failures.record(&path);
+            }
+        }
     }
     Ok(())
 }
