@@ -7,6 +7,8 @@ edition = "2024"
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 notify = "8.2.1"
+rubato = "5.0.1"
+symphonia = { version = "0.6.1", features = ["aac", "isomp4", "mp3", "wav", "flac", "alac"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 

@@ -1,4 +1,5 @@
 mod config;
+mod decoder;
 mod watcher;
 
 use std::time::Duration;
@@ -25,8 +26,19 @@ fn main() -> anyhow::Result<()> {
             tracing::debug!(file = %path.display(), "file disappeared, skipping");
             continue;
         }
-        // TODO: decode, transcribe, write the transcription, move the audio file.
-        tracing::info!(file = %path.display(), "new audio file ready (processing not implemented yet)");
+        let audio = match decoder::decode_file(&path) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::error!(file = %path.display(), "decoding failed: {e:#}");
+                continue;
+            }
+        };
+        // TODO: transcribe, write the transcription, move the audio file.
+        tracing::info!(
+            file = %path.display(),
+            duration_secs = audio.duration_secs(),
+            "decoded (transcription not implemented yet)"
+        );
     }
     Ok(())
 }
