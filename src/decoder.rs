@@ -2,6 +2,7 @@
 
 use std::fs::File;
 use std::path::Path;
+use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
@@ -31,13 +32,56 @@ impl DecodedAudio {
 }
 
 /// Decodes `path` to 16 kHz mono f32.
+///
+/// Uses the built-in pure-Rust decoder first. Files it cannot handle (e.g.
+/// HE-AAC, more than 2 channels, unusual AAC variants) are retried with
+/// `ffmpeg` if it is installed (it is in the container image).
 pub fn decode_file(path: &Path) -> Result<DecodedAudio> {
+    match decode_native(path) {
+        Ok(audio) => Ok(audio),
+        Err(native_err) => {
+            tracing::warn!(
+                file = %path.display(),
+                "built-in decoder failed ({native_err:#}), trying ffmpeg"
+            );
+            match decode_ffmpeg(path) {
+                Ok(samples) if !samples.is_empty() => Ok(DecodedAudio { samples }),
+                Ok(_) => Err(native_err.context("ffmpeg fallback produced no audio")),
+                Err(ffmpeg_err) => {
+                    Err(native_err.context(format!("ffmpeg fallback failed: {ffmpeg_err:#}")))
+                }
+            }
+        }
+    }
+}
+
+fn decode_native(path: &Path) -> Result<DecodedAudio> {
     let (mono, rate) = decode_to_mono(path)?;
     if mono.is_empty() {
         bail!("no audio samples decoded from {}", path.display());
     }
     let samples = resample_mono(&mono, rate, WHISPER_SAMPLE_RATE)?;
     Ok(DecodedAudio { samples })
+}
+
+/// Decodes with the `ffmpeg` binary straight to 16 kHz mono f32 (raw, via a pipe).
+fn decode_ffmpeg(path: &Path) -> Result<Vec<f32>> {
+    let output = Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-i"])
+        // "file:" keeps a path starting with "-" from being read as an option.
+        .arg(format!("file:{}", path.display()))
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"])
+        .output()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => anyhow!("ffmpeg is not installed"),
+            _ => anyhow!("cannot run ffmpeg: {e}"),
+        })?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        bail!("ffmpeg exited with {}: {}", output.status, err.trim());
+    }
+    let (frames, _rest) = output.stdout.as_chunks::<4>();
+    Ok(frames.iter().map(|b| f32::from_le_bytes(*b)).collect())
 }
 
 /// Averages interleaved multi-channel samples into mono.

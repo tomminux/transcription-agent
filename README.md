@@ -12,6 +12,8 @@ new-audio-files/  ──►  transcriptions/<name>.md
                   └──►  transcribed-audio-files/<name>.m4a
 ```
 
+Audio is decoded in-process; files that variant the built-in decoder rejects
+(HE-AAC, multichannel...) are decoded with `ffmpeg`, which is in the image.
 The language is detected automatically. Transcription uses whisper.cpp
 (CPU only), so expect it to take a fraction of the recording's length to a bit
 more than real time, depending on the model.

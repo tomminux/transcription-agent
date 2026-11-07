@@ -27,8 +27,9 @@ COPY src ./src
 RUN cargo build --release
 
 FROM debian:bookworm-slim AS runtime
+# ffmpeg: fallback decoder for AAC variants the built-in decoder rejects (HE-AAC, multichannel...).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 1000 --create-home agent
 COPY --from=builder /app/target/release/transcription-agent /usr/local/bin/transcription-agent
