@@ -3,7 +3,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 
@@ -38,11 +39,20 @@ pub fn scan_existing(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Blocks until the file size is unchanged for `required_stable` consecutive
-/// checks spaced by `interval`. Returns false if the file disappears.
-pub fn wait_until_stable(path: &Path, interval: Duration, required_stable: u32) -> bool {
+/// checks spaced by `interval`. Returns false if the file disappears or
+/// `shutdown` is set.
+pub fn wait_until_stable(
+    path: &Path,
+    interval: Duration,
+    required_stable: u32,
+    shutdown: &AtomicBool,
+) -> bool {
     let mut last = None;
     let mut stable = 0;
     loop {
+        if shutdown.load(Ordering::Relaxed) {
+            return false;
+        }
         let Ok(meta) = std::fs::metadata(path) else {
             return false;
         };
@@ -83,21 +93,26 @@ impl FileQueue {
     }
 
     /// Next path to process, blocking until one arrives.
-    /// Returns `None` when the sender side is gone and the queue is empty.
-    pub fn next(&mut self) -> Option<PathBuf> {
-        while let Ok(p) = self.rx.try_recv() {
-            self.push(p);
-        }
-        if self.queue.is_empty() {
-            let p = self.rx.recv().ok()?;
-            self.push(p);
+    /// Returns `None` when `shutdown` is set, or when the sender side is gone
+    /// and the queue is empty.
+    pub fn next(&mut self, shutdown: &AtomicBool) -> Option<PathBuf> {
+        loop {
+            if shutdown.load(Ordering::Relaxed) {
+                return None;
+            }
             while let Ok(p) = self.rx.try_recv() {
                 self.push(p);
             }
+            if let Some(path) = self.queue.pop_front() {
+                self.queued.remove(&path);
+                return Some(path);
+            }
+            match self.rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(p) => self.push(p),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return None,
+            }
         }
-        let path = self.queue.pop_front()?;
-        self.queued.remove(&path);
-        Some(path)
     }
 }
 
@@ -223,12 +238,16 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("a.m4a");
         fs::write(&f, b"data").unwrap();
-        assert!(wait_until_stable(&f, Duration::from_millis(10), 2));
+        let no = AtomicBool::new(false);
+        assert!(wait_until_stable(&f, Duration::from_millis(10), 2, &no));
         assert!(!wait_until_stable(
             &d.path().join("gone.m4a"),
             Duration::from_millis(10),
-            2
+            2,
+            &no
         ));
+        let yes = AtomicBool::new(true);
+        assert!(!wait_until_stable(&f, Duration::from_millis(10), 2, &yes));
     }
 
     #[test]
@@ -239,7 +258,8 @@ mod tests {
         }
         drop(tx);
         let mut q = FileQueue::new(rx);
-        let got: Vec<_> = std::iter::from_fn(|| q.next()).collect();
+        let no = AtomicBool::new(false);
+        let got: Vec<_> = std::iter::from_fn(|| q.next(&no)).collect();
         assert_eq!(got, [PathBuf::from("a"), "b".into(), "c".into()]);
     }
 
@@ -248,9 +268,21 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("old.m4a"), b"x").unwrap();
         let (_w, mut q) = watch(d.path(), Duration::from_secs(60)).unwrap();
-        assert_eq!(q.next().unwrap().file_name().unwrap(), "old.m4a");
+        assert_eq!(
+            q.next(&AtomicBool::new(false))
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "old.m4a"
+        );
         fs::write(d.path().join("new.m4a"), b"x").unwrap();
-        assert_eq!(q.next().unwrap().file_name().unwrap(), "new.m4a");
+        assert_eq!(
+            q.next(&AtomicBool::new(false))
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "new.m4a"
+        );
     }
 
     #[test]
@@ -260,7 +292,13 @@ mod tests {
         // tick (the two paths cannot be separated on a local filesystem).
         let (_w, mut q) = watch(d.path(), Duration::from_millis(50)).unwrap();
         fs::write(d.path().join("late.m4a"), b"x").unwrap();
-        assert_eq!(q.next().unwrap().file_name().unwrap(), "late.m4a");
+        assert_eq!(
+            q.next(&AtomicBool::new(false))
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "late.m4a"
+        );
     }
 
     #[test]
@@ -275,5 +313,12 @@ mod tests {
         fs::write(&f, b"longer content").unwrap();
         assert!(!t.should_skip(&f));
         assert!(!t.should_skip(&d.path().join("never-failed.m4a")));
+    }
+
+    #[test]
+    fn queue_returns_none_on_shutdown() {
+        let (_tx, rx) = mpsc::channel::<PathBuf>();
+        let mut q = FileQueue::new(rx);
+        assert_eq!(q.next(&AtomicBool::new(true)), None);
     }
 }

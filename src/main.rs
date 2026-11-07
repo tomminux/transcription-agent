@@ -4,6 +4,8 @@ mod output;
 mod transcriber;
 mod watcher;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
@@ -18,6 +20,14 @@ fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
     config.ensure_dirs()?;
+
+    // First SIGTERM/SIGINT sets `shutdown` (finish cleanly); a second one exits
+    // immediately. The conditional-shutdown hook must be registered first.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
+        signal_hook::flag::register_conditional_shutdown(sig, 1, Arc::clone(&shutdown))?;
+        signal_hook::flag::register(sig, Arc::clone(&shutdown))?;
+    }
 
     whisper_rs::install_logging_hooks();
     let transcriber = transcriber::Transcriber::new(&config.model)?;
@@ -38,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    while let Some(path) = queue.next() {
+    while let Some(path) = queue.next(&shutdown) {
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -46,7 +56,7 @@ fn main() -> anyhow::Result<()> {
         if failures.should_skip(&path) {
             continue;
         }
-        if !watcher::wait_until_stable(&path, Duration::from_secs(1), 2) {
+        if !watcher::wait_until_stable(&path, Duration::from_secs(1), 2, &shutdown) {
             tracing::debug!(file = %path.display(), "file disappeared, skipping");
             continue;
         }
@@ -58,8 +68,12 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        let transcript = match transcriber.transcribe(&audio.samples) {
-            Ok(t) => t,
+        let transcript = match transcriber.transcribe(&audio.samples, &shutdown) {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                tracing::info!(file = %path.display(), "transcription interrupted, audio left in place");
+                break;
+            }
             Err(e) => {
                 tracing::error!(file = %path.display(), "transcription failed: {e:#}");
                 failures.record(&path);
@@ -93,6 +107,9 @@ fn main() -> anyhow::Result<()> {
                 failures.record(&path);
             }
         }
+    }
+    if shutdown.load(Ordering::Relaxed) {
+        tracing::info!("shutdown requested, exiting cleanly");
     }
     Ok(())
 }

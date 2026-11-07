@@ -79,6 +79,12 @@ Build prerequisites for `whisper-rs`: `cmake`, a C/C++ toolchain and `clang`/`li
 - Add unit tests for pure logic (file filtering, name collision, front matter); keep tests independent of model downloads.
 - Run `cargo fmt` and `cargo clippy` before each commit.
 
+## Gotchas
+
+- `whisper-rs` 0.16.0: `FullParams::set_abort_callback_safe` is broken (wrong user-data pointer type, whisper fails with "failed to encode"). `transcriber.rs` uses the raw `set_abort_callback` with its own C trampoline instead. Re-test before switching back after a `whisper-rs` upgrade.
+- `whisper-rs`: use `set_language(Some("auto"))`, never `set_detect_language(true)` (detects only, no transcription).
+- Shutdown: first SIGTERM/SIGINT finishes cleanly (aborts a running transcription, leaves the audio in `new-audio-files/`); a second signal exits immediately.
+
 ## Git
 
 - Repository is private. Commit in small, logical steps with clear messages; commit after each meaningful milestone.
