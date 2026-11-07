@@ -1,5 +1,6 @@
 /target
 /models
+.env
 # Keep folders, ignore their contents (private audio and transcripts)
 /new-audio-files/*
 /transcriptions/*

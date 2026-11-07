@@ -39,7 +39,7 @@ Directories (at repo root, contents are gitignored, `.gitkeep` keeps them in git
 - **File watching on a Mac host is unreliable:** with Docker Desktop/Colima, changes made on macOS often do not generate inotify events inside the container. The agent must therefore also do a **periodic rescan** of the input folder (e.g. every few seconds, interval configurable) in addition to `notify` events (or use `notify`'s `PollWatcher`). The startup scan already exists. Never rely only on events.
 - **Moves:** since all three folders are under one mount, `rename()` works. Still keep a fallback to copy + fsync + delete on `EXDEV` (only delete the source after a successful copy), in case the folders are configured on separate mounts.
 - **Configuration through environment variables** as well as CLI flags (clap `env`), with container defaults pointing at `/data/...` and `/models/...`.
-- **Permissions:** run as a non-root user; support mapping the host UID/GID (`user:` in compose) so files written to the Mac folders are owned by the Mac user.
+- **Permissions:** run as a non-root user; support mapping the host UID/GID (`user: "${HOST_UID}:${HOST_GID}"` in compose, values come from a gitignored `.env` written by `scripts/setup.sh`; do not use `UID`, it is a read-only shell variable and not exported) so files written to the Mac folders are owned by the Mac user.
 - **CPU build:** do not build the image with `-C target-cpu=native` / host-specific whisper.cpp flags (the build machine may differ from the run machine). The Dockerfile sets `GGML_NATIVE=OFF` plus `GGML_AVX/AVX2/FMA/F16C=ON` (env vars starting with `GGML_` are forwarded to cmake by `whisper-rs-sys`), so the image needs an Intel Mac with AVX2 (2013+).
 - **Resources:** Whisper is CPU- and memory-heavy; document the Docker Desktop CPU/RAM limits needed for the chosen model (`base` ~1 GB, `small` ~2 GB).
 - **Logs** go to stdout/stderr (`docker compose logs -f`), not to files.
@@ -64,6 +64,7 @@ cargo test
 cargo fmt --check
 cargo clippy -- -D warnings
 
+scripts/setup.sh              # write .env (uid/gid, data dir) and create folders
 docker compose build          # build the linux/amd64 image
 docker compose up -d          # run the agent in the background
 docker compose logs -f        # follow the logs

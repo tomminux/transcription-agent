@@ -9,8 +9,8 @@ services:
     restart: unless-stopped
     init: true # reaps zombies and forwards SIGTERM
     # Run as the Mac user so files written to the mounted folders belong to you.
-    # Export first (not exported by default in bash/zsh): export UID GID=$(id -g)
-    user: "${UID:-1000}:${GID:-1000}"
+    # HOST_UID/HOST_GID come from .env (create it with scripts/setup.sh).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       TA_SCAN_INTERVAL_SECS: "${TA_SCAN_INTERVAL_SECS:-5}"
       RUST_LOG: "${RUST_LOG:-info}"
