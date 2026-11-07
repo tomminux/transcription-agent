@@ -1,5 +1,6 @@
 mod config;
 mod decoder;
+mod transcriber;
 mod watcher;
 
 use std::time::Duration;
@@ -16,6 +17,10 @@ fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
     config.ensure_dirs()?;
+
+    whisper_rs::install_logging_hooks();
+    let transcriber = transcriber::Transcriber::new(&config.model)?;
+    tracing::info!(model = %config.model.display(), "model loaded");
 
     // Keep `_watcher` alive: dropping it stops the events.
     let (_watcher, mut queue) = watcher::watch(
@@ -42,11 +47,22 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        // TODO: transcribe, write the transcription, move the audio file.
+        let transcript = match transcriber.transcribe(&audio.samples) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(file = %path.display(), "transcription failed: {e:#}");
+                failures.record(&path);
+                continue;
+            }
+        };
+        // TODO: write the transcription, move the audio file.
+        // Never log transcript text: it is private.
         tracing::info!(
             file = %path.display(),
             duration_secs = audio.duration_secs(),
-            "decoded (transcription not implemented yet)"
+            language = %transcript.language,
+            chars = transcript.text.chars().count(),
+            "transcribed (writer/mover not implemented yet)"
         );
     }
     Ok(())

@@ -40,7 +40,7 @@ Directories (at repo root, contents are gitignored, `.gitkeep` keeps them in git
 - **Moves:** since all three folders are under one mount, `rename()` works. Still keep a fallback to copy + fsync + delete on `EXDEV` (only delete the source after a successful copy), in case the folders are configured on separate mounts.
 - **Configuration through environment variables** as well as CLI flags (clap `env`), with container defaults pointing at `/data/...` and `/models/...`.
 - **Permissions:** run as a non-root user; support mapping the host UID/GID (`user:` in compose) so files written to the Mac folders are owned by the Mac user.
-- **CPU build:** do not build the image with `-C target-cpu=native` / host-specific whisper.cpp flags (the build machine may differ from the run machine). Use a portable x86_64 baseline, with AVX2 where safe.
+- **CPU build:** do not build the image with `-C target-cpu=native` / host-specific whisper.cpp flags (the build machine may differ from the run machine). The Dockerfile sets `GGML_NATIVE=OFF` plus `GGML_AVX/AVX2/FMA/F16C=ON` (env vars starting with `GGML_` are forwarded to cmake by `whisper-rs-sys`), so the image needs an Intel Mac with AVX2 (2013+).
 - **Resources:** Whisper is CPU- and memory-heavy; document the Docker Desktop CPU/RAM limits needed for the chosen model (`base` ~1 GB, `small` ~2 GB).
 - **Logs** go to stdout/stderr (`docker compose logs -f`), not to files.
 - **Graceful shutdown:** handle SIGTERM (container stop). Finish or abandon the current file safely; the audio stays in `new-audio-files/` unless fully processed.
@@ -58,6 +58,8 @@ Directories (at repo root, contents are gitignored, `.gitkeep` keeps them in git
 ```
 cargo build --release
 cargo run --release
+scripts/download-model.sh base   # models/ggml-base.bin (use `tiny` for quick tests)
+TA_TEST_MODEL=models/ggml-tiny.bin cargo test   # also runs the real-model test
 cargo test
 cargo fmt --check
 cargo clippy -- -D warnings
@@ -68,7 +70,7 @@ docker compose logs -f        # follow the logs
 docker compose down           # stop it
 ```
 
-Build prerequisites for `whisper-rs`: `cmake` and a C/C++ toolchain. Inside the container these are provided by the builder stage, so nothing needs to be installed on the Mac except Docker (or Colima/Podman).
+Build prerequisites for `whisper-rs`: `cmake`, a C/C++ toolchain and `clang`/`libclang` (bindgen; set `LIBCLANG_PATH` if it is not found). Inside the container these are provided by the builder stage, so nothing needs to be installed on the Mac except Docker (or Colima/Podman).
 
 ## Conventions
 

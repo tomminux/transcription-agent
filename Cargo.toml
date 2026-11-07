@@ -11,6 +11,7 @@ rubato = "5.0.1"
 symphonia = { version = "0.6.1", features = ["aac", "isomp4", "mp3", "wav", "flac", "alac"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+whisper-rs = { version = "0.16.0", features = ["tracing_backend"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
