@@ -1,0 +1,10 @@
+/target
+/models
+# Keep folders, ignore their contents (private audio and transcripts)
+/new-audio-files/*
+/transcriptions/*
+/transcribed-audio-files/*
+!/new-audio-files/.gitkeep
+!/transcriptions/.gitkeep
+!/transcribed-audio-files/.gitkeep
+.DS_Store
