@@ -1,11 +1,11 @@
 //! Folder watching: finds audio files already present and new arrivals,
 //! and yields each one once, sequentially, when it is fully written.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -101,9 +101,44 @@ impl FileQueue {
     }
 }
 
+/// Remembers files that failed processing so the periodic rescan does not
+/// retry them forever. A file is retried only if it changed (size or mtime).
+#[derive(Default)]
+pub struct FailureTracker {
+    failed: HashMap<PathBuf, (u64, Option<SystemTime>)>,
+}
+
+impl FailureTracker {
+    fn fingerprint(path: &Path) -> Option<(u64, Option<SystemTime>)> {
+        let m = std::fs::metadata(path).ok()?;
+        Some((m.len(), m.modified().ok()))
+    }
+
+    /// Records that processing `path` failed in its current state.
+    pub fn record(&mut self, path: &Path) {
+        if let Some(fp) = Self::fingerprint(path) {
+            self.failed.insert(path.to_path_buf(), fp);
+        }
+    }
+
+    /// True if `path` failed before and has not changed since.
+    pub fn should_skip(&mut self, path: &Path) -> bool {
+        match (self.failed.get(path), Self::fingerprint(path)) {
+            (Some(old), Some(now)) if *old == now => true,
+            (Some(_), _) => {
+                self.failed.remove(path);
+                false
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Starts watching `dir`. Existing files are queued first, then new ones.
+/// Besides `notify` events, the folder is rescanned every `rescan_interval`
+/// (bind-mounted macOS folders often produce no events inside a container).
 /// The returned watcher must be kept alive for events to keep flowing.
-pub fn watch(dir: &Path) -> Result<(RecommendedWatcher, FileQueue)> {
+pub fn watch(dir: &Path, rescan_interval: Duration) -> Result<(RecommendedWatcher, FileQueue)> {
     let (tx, rx) = mpsc::channel();
 
     let event_tx = tx.clone();
@@ -129,6 +164,24 @@ pub fn watch(dir: &Path) -> Result<(RecommendedWatcher, FileQueue)> {
     for path in scan_existing(dir)? {
         let _ = tx.send(path);
     }
+
+    // Periodic rescan; the queue de-duplicates. Ends when the queue is dropped.
+    let scan_dir = dir.to_path_buf();
+    std::thread::spawn(move || {
+        loop {
+            sleep(rescan_interval);
+            match scan_existing(&scan_dir) {
+                Ok(files) => {
+                    for path in files {
+                        if tx.send(path).is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!("rescan failed: {e:#}"),
+            }
+        }
+    });
 
     Ok((watcher, FileQueue::new(rx)))
 }
@@ -194,9 +247,33 @@ mod tests {
     fn watch_reports_existing_and_new_files() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("old.m4a"), b"x").unwrap();
-        let (_w, mut q) = watch(d.path()).unwrap();
+        let (_w, mut q) = watch(d.path(), Duration::from_secs(60)).unwrap();
         assert_eq!(q.next().unwrap().file_name().unwrap(), "old.m4a");
         fs::write(d.path().join("new.m4a"), b"x").unwrap();
         assert_eq!(q.next().unwrap().file_name().unwrap(), "new.m4a");
+    }
+
+    #[test]
+    fn new_file_is_reported_with_rescan_enabled() {
+        let d = tempfile::tempdir().unwrap();
+        // Smoke test: the file is reported whether via an event or a rescan
+        // tick (the two paths cannot be separated on a local filesystem).
+        let (_w, mut q) = watch(d.path(), Duration::from_millis(50)).unwrap();
+        fs::write(d.path().join("late.m4a"), b"x").unwrap();
+        assert_eq!(q.next().unwrap().file_name().unwrap(), "late.m4a");
+    }
+
+    #[test]
+    fn failure_tracker_skips_unchanged_and_retries_changed() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("a.m4a");
+        fs::write(&f, b"one").unwrap();
+        let mut t = FailureTracker::default();
+        assert!(!t.should_skip(&f));
+        t.record(&f);
+        assert!(t.should_skip(&f));
+        fs::write(&f, b"longer content").unwrap();
+        assert!(!t.should_skip(&f));
+        assert!(!t.should_skip(&d.path().join("never-failed.m4a")));
     }
 }

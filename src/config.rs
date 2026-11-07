@@ -10,20 +10,25 @@ use clap::Parser;
 )]
 pub struct Config {
     /// Folder watched for new audio files.
-    #[arg(long, default_value = "new-audio-files")]
+    #[arg(long, env = "TA_INPUT_DIR", default_value = "new-audio-files")]
     pub input_dir: PathBuf,
 
     /// Folder where Markdown transcriptions are written.
-    #[arg(long, default_value = "transcriptions")]
+    #[arg(long, env = "TA_OUTPUT_DIR", default_value = "transcriptions")]
     pub output_dir: PathBuf,
 
     /// Folder where audio files are moved after transcription.
-    #[arg(long, default_value = "transcribed-audio-files")]
+    #[arg(long, env = "TA_DONE_DIR", default_value = "transcribed-audio-files")]
     pub done_dir: PathBuf,
 
     /// Path to the whisper.cpp ggml model file.
-    #[arg(long, default_value = "models/ggml-base.bin")]
+    #[arg(long, env = "TA_MODEL", default_value = "models/ggml-base.bin")]
     pub model: PathBuf,
+
+    /// Seconds between rescans of the input folder. Needed because file
+    /// events from a macOS host often do not reach a container.
+    #[arg(long, env = "TA_SCAN_INTERVAL_SECS", default_value_t = 5)]
+    pub scan_interval_secs: u64,
 }
 
 impl Config {
@@ -48,6 +53,7 @@ mod tests {
         assert_eq!(c.input_dir, PathBuf::from("new-audio-files"));
         assert_eq!(c.output_dir, PathBuf::from("transcriptions"));
         assert_eq!(c.done_dir, PathBuf::from("transcribed-audio-files"));
+        assert_eq!(c.scan_interval_secs, 5);
     }
 
     #[test]

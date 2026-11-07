@@ -18,10 +18,18 @@ fn main() -> anyhow::Result<()> {
     config.ensure_dirs()?;
 
     // Keep `_watcher` alive: dropping it stops the events.
-    let (_watcher, mut queue) = watcher::watch(&config.input_dir)?;
+    let (_watcher, mut queue) = watcher::watch(
+        &config.input_dir,
+        Duration::from_secs(config.scan_interval_secs.max(1)),
+    )?;
     tracing::info!(dir = %config.input_dir.display(), "watching for new audio files");
 
+    let mut failures = watcher::FailureTracker::default();
+
     while let Some(path) = queue.next() {
+        if failures.should_skip(&path) {
+            continue;
+        }
         if !watcher::wait_until_stable(&path, Duration::from_secs(1), 2) {
             tracing::debug!(file = %path.display(), "file disappeared, skipping");
             continue;
@@ -30,6 +38,7 @@ fn main() -> anyhow::Result<()> {
             Ok(a) => a,
             Err(e) => {
                 tracing::error!(file = %path.display(), "decoding failed: {e:#}");
+                failures.record(&path);
                 continue;
             }
         };
