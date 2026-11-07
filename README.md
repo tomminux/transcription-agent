@@ -27,7 +27,7 @@ docker compose logs -f
 ```
 
 Then drop a `.m4a` into
-`/Users/paolo/docker-host-container/transcription-agent/new-audio-files/`.
+`/Users/paolo/docker-host-containers/transcription-agent/new-audio-files/`.
 (Pass another folder to `scripts/setup.sh <dir>` to change it.)
 
 Stop with `docker compose down` (the agent shuts down cleanly; a recording
@@ -63,7 +63,7 @@ Environment variables (set in `.env`) or CLI flags:
 
 | Variable | Default (container) | Meaning |
 |---|---|---|
-| `HOST_DATA_DIR` | `/Users/paolo/docker-host-container/transcription-agent` | Host folder holding the three subfolders (mounted at `/data`) |
+| `HOST_DATA_DIR` | `/Users/paolo/docker-host-containers/transcription-agent` | Host folder holding the three subfolders (mounted at `/data`) |
 | `HOST_MODELS_DIR` | `./models` | Host folder with the ggml models (mounted read-only at `/models`) |
 | `TA_MODEL` | `/models/ggml-base.bin` | Model file (e.g. `ggml-small.bin` for better accuracy) |
 | `TA_SCAN_INTERVAL_SECS` | `5` | How often the input folder is rescanned |

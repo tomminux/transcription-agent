@@ -2,11 +2,11 @@
 # Creates .env (gitignored) so the container runs as your user and the files
 # it writes to the mounted folders belong to you. Safe to re-run.
 # Usage: scripts/setup.sh [data-dir]
-#   data-dir defaults to /Users/paolo/docker-host-container/transcription-agent
+#   data-dir defaults to /Users/paolo/docker-host-containers/transcription-agent
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-data_dir="${1:-/Users/paolo/docker-host-container/transcription-agent}"
+data_dir="${1:-/Users/paolo/docker-host-containers/transcription-agent}"
 
 cat > "$root/.env" <<ENV
 HOST_UID=$(id -u)
