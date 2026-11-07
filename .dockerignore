@@ -1,0 +1,8 @@
+.git
+target
+models
+new-audio-files
+transcriptions
+transcribed-audio-files
+*.md
+!CLAUDE.md
