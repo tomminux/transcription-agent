@@ -9,13 +9,35 @@ use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, get_lang_str,
 };
 
+/// One timed piece of speech, as segmented by Whisper.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Segment {
+    /// Start time in centiseconds (Whisper's unit).
+    pub start_cs: i64,
+    /// End time in centiseconds.
+    pub end_cs: i64,
+    /// Trimmed, non-empty text.
+    pub text: String,
+}
+
 /// Result of transcribing one audio file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transcript {
-    /// Full text, segments joined and trimmed.
-    pub text: String,
+    /// Timed segments in order (empty segments already dropped).
+    pub segments: Vec<Segment>,
     /// Detected language code (e.g. "it", "en"), or "unknown".
     pub language: String,
+}
+
+impl Transcript {
+    /// The whole text without timestamps.
+    pub fn text(&self) -> String {
+        self.segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// Loaded Whisper model, reused for every file.
@@ -79,19 +101,23 @@ impl Transcriber {
         }
         result.context("transcription failed")?;
 
-        let parts: Vec<String> = state
-            .as_iter()
-            .map(|s| s.to_str_lossy().map(|t| t.into_owned()))
-            .collect::<std::result::Result<_, _>>()
-            .context("cannot read segment text")?;
+        let mut segments = Vec::new();
+        for seg in state.as_iter() {
+            let text = seg.to_str_lossy().context("cannot read segment text")?;
+            let text = text.trim();
+            if !text.is_empty() {
+                segments.push(Segment {
+                    start_cs: seg.start_timestamp(),
+                    end_cs: seg.end_timestamp(),
+                    text: text.to_string(),
+                });
+            }
+        }
         let language = get_lang_str(state.full_lang_id_from_state())
             .unwrap_or("unknown")
             .to_string();
 
-        Ok(Some(Transcript {
-            text: join_segments(&parts),
-            language,
-        }))
+        Ok(Some(Transcript { segments, language }))
     }
 }
 
@@ -102,30 +128,27 @@ unsafe extern "C" fn abort_trampoline(user_data: *mut std::ffi::c_void) -> bool 
     flag.load(Ordering::Relaxed)
 }
 
-/// Joins segment texts into one trimmed string, dropping empty segments.
-fn join_segments(parts: &[String]) -> String {
-    parts
-        .iter()
-        .map(|p| p.trim())
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn join_trims_and_drops_empty() {
-        let parts = vec![
-            " Hello ".to_string(),
-            "".into(),
-            "  ".into(),
-            "world\n".into(),
-        ];
-        assert_eq!(join_segments(&parts), "Hello world");
-        assert_eq!(join_segments(&[]), "");
+    fn text_joins_segments() {
+        let seg = |t: &str| Segment {
+            start_cs: 0,
+            end_cs: 100,
+            text: t.into(),
+        };
+        let t = Transcript {
+            segments: vec![seg("Hello"), seg("world")],
+            language: "en".into(),
+        };
+        assert_eq!(t.text(), "Hello world");
+        let empty = Transcript {
+            segments: vec![],
+            language: "en".into(),
+        };
+        assert_eq!(empty.text(), "");
     }
 
     #[test]

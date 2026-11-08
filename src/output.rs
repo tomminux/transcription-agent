@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::transcriber::Transcript;
+use crate::transcriber::{Segment, Transcript};
 
 /// Metadata written to the front matter of the Markdown file.
 pub struct Meta<'a> {
@@ -48,7 +48,29 @@ fn rfc3339(t: SystemTime) -> String {
     DateTime::<Utc>::from(t).to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-/// Renders the Markdown document: YAML front matter followed by the text.
+/// Formats centiseconds as `HH:MM:SS` (hours can exceed 99 for very long audio).
+fn format_timestamp(cs: i64) -> String {
+    let total = (cs.max(0) / 100) as u64;
+    format!(
+        "{:02}:{:02}:{:02}",
+        total / 3600,
+        (total / 60) % 60,
+        total % 60
+    )
+}
+
+/// One body line: `[HH:MM:SS - HH:MM:SS] text`.
+fn format_segment(seg: &Segment) -> String {
+    format!(
+        "[{} - {}] {}",
+        format_timestamp(seg.start_cs),
+        format_timestamp(seg.end_cs),
+        seg.text
+    )
+}
+
+/// Renders the Markdown document: YAML front matter followed by one
+/// timestamped line per segment.
 pub fn render_markdown(meta: &Meta, transcript: &Transcript, transcribed_at: SystemTime) -> String {
     let mut s = String::from("---\n");
     s.push_str(&format!("source: {}\n", yaml_quote(meta.source_name)));
@@ -60,8 +82,10 @@ pub fn render_markdown(meta: &Meta, transcript: &Transcript, transcribed_at: Sys
     s.push_str(&format!("language: {}\n", yaml_quote(&transcript.language)));
     s.push_str(&format!("model: {}\n", yaml_quote(meta.model)));
     s.push_str("---\n\n");
-    s.push_str(&transcript.text);
-    s.push('\n');
+    for seg in &transcript.segments {
+        s.push_str(&format_segment(seg));
+        s.push('\n');
+    }
     s
 }
 
@@ -163,7 +187,11 @@ mod tests {
 
     fn transcript(text: &str) -> Transcript {
         Transcript {
-            text: text.into(),
+            segments: vec![Segment {
+                start_cs: 0,
+                end_cs: 1234,
+                text: text.into(),
+            }],
             language: "it".into(),
         }
     }
@@ -196,8 +224,34 @@ mod tests {
             md,
             "---\nsource: \"a b.m4a\"\nrecorded_at: 2023-11-14T22:13:20Z\n\
              transcribed_at: 2023-11-14T22:15:00Z\nduration_seconds: 12.3\n\
-             language: \"it\"\nmodel: \"ggml-base.bin\"\n---\n\nCiao mondo\n"
+             language: \"it\"\nmodel: \"ggml-base.bin\"\n---\n\n[00:00:00 - 00:00:12] Ciao mondo\n"
         );
+    }
+
+    #[test]
+    fn timestamps_format_hours_minutes_seconds() {
+        assert_eq!(format_timestamp(0), "00:00:00");
+        assert_eq!(format_timestamp(99), "00:00:00");
+        assert_eq!(format_timestamp(6150), "00:01:01");
+        assert_eq!(format_timestamp(366_150), "01:01:01");
+        assert_eq!(format_timestamp(-5), "00:00:00");
+    }
+
+    #[test]
+    fn multiple_segments_one_line_each_and_empty_has_no_body() {
+        let now = SystemTime::UNIX_EPOCH;
+        let mut t = transcript("one");
+        t.segments.push(Segment {
+            start_cs: 1500,
+            end_cs: 366_150,
+            text: "two".into(),
+        });
+        let md = render_markdown(&meta("a.m4a"), &t, now);
+        assert!(md.ends_with("---\n\n[00:00:00 - 00:00:12] one\n[00:00:15 - 01:01:01] two\n"));
+
+        t.segments.clear();
+        let md = render_markdown(&meta("a.m4a"), &t, now);
+        assert!(md.ends_with("---\n\n"));
     }
 
     #[test]
@@ -227,7 +281,11 @@ mod tests {
 
         let md = store_result(&audio, &out, &done, &transcript("Hi"), &meta("rec.m4a")).unwrap();
         assert_eq!(md, out.join("rec.md"));
-        assert!(fs::read_to_string(&md).unwrap().ends_with("\n\nHi\n"));
+        assert!(
+            fs::read_to_string(&md)
+                .unwrap()
+                .ends_with("\n\n[00:00:00 - 00:00:12] Hi\n")
+        );
         assert!(!audio.exists());
         assert_eq!(fs::read(done.join("rec.m4a")).unwrap(), b"audio");
         // No temp files left behind.

@@ -99,7 +99,8 @@ fn main() -> anyhow::Result<()> {
                 transcription = %md.display(),
                 duration_secs = audio.duration_secs(),
                 language = %transcript.language,
-                chars = transcript.text.chars().count(),
+                segments = transcript.segments.len(),
+                chars = transcript.text().chars().count(),
                 "transcribed and moved"
             ),
             Err(e) => {

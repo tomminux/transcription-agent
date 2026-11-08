@@ -53,8 +53,13 @@ language: "it"
 model: "ggml-base.bin"
 ---
 
-Transcribed text...
+[00:00:00 - 00:00:04] First sentence as segmented by Whisper.
+[00:00:04 - 00:00:09] Second sentence...
 ```
+
+One line per segment: `[start - end] text`, in `HH:MM:SS`. The timestamps
+(and the gaps between segments) are useful for a later step such as speaker
+labelling or summarising with an LLM.
 
 If a name is already used, the new pair is saved as `<name>-2.md` /
 `<name>-2.m4a`; nothing is ever overwritten.
