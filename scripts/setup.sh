@@ -13,6 +13,7 @@ HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 HOST_DATA_DIR=$data_dir
 HOST_MODELS_DIR=$root/models
+# TA_MODEL=/models/ggml-small.bin
 # TA_SCAN_INTERVAL_SECS=5
 # RUST_LOG=info
 ENV
