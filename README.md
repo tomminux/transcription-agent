@@ -18,7 +18,7 @@ The language is detected automatically. Transcription uses whisper.cpp
 (CPU only), so expect it to take a fraction of the recording's length to a bit
 more than real time, depending on the model.
 
-## Run it (Mac with Docker Desktop, Colima or Podman)
+## Run it with Docker (Mac with Docker Desktop or Colima)
 
 ```bash
 git clone <this repo> && cd transcription-agent
@@ -38,6 +38,66 @@ start).
 
 Give Docker at least 2 CPUs and 2 GB RAM (`base` needs ~1 GB, `small` ~2 GB).
 The image needs a CPU with AVX2 (Intel Macs from 2013 on).
+
+## Run it with Podman (macOS)
+
+> Not yet tested on a real Mac: if something differs, see Troubleshooting and
+> tell us what you got.
+
+Podman on macOS runs containers inside a small Linux VM (`podman machine`).
+On an Intel Mac the VM is x86_64, so the `linux/amd64` image runs natively.
+
+```bash
+# 1. Install and create the VM (once). CPUs/RAM go to the VM: Whisper needs
+#    at least 2 CPUs and 2 GB (use 4096 for the `small` model).
+brew install podman
+podman machine init --cpus 4 --memory 4096
+podman machine start
+
+# 2. Repo setup. --podman runs the agent as container "root" (uid 0), which
+#    rootless Podman maps to your Mac user, so files in the mounted folders are
+#    yours. (Do not use your own uid here: it would map to an unrelated uid.)
+git clone git@github.com:tomminux/transcription-agent.git && cd transcription-agent
+scripts/setup.sh --podman
+scripts/download-model.sh base
+```
+
+The default `podman machine` shares your home folder (`/Users/paolo`) with the
+VM, so `/Users/paolo/docker-host-containers/transcription-agent` and the
+repo's `models/` folder are visible to containers without extra options.
+
+Then start it, **either** with compose:
+
+```bash
+brew install podman-compose        # or docker-compose; `podman compose` uses whichever is installed
+podman compose up -d --build
+podman compose logs -f
+podman compose down                # stop
+```
+
+**or** with plain Podman (no compose needed):
+
+```bash
+podman build --platform linux/amd64 -t transcription-agent:local .
+
+DATA=/Users/paolo/docker-host-containers/transcription-agent
+podman run -d --name transcription-agent --restart unless-stopped --init \
+  --platform linux/amd64 \
+  -v "$DATA":/data \
+  -v "$PWD/models":/models:ro \
+  -e TA_MODEL=/models/ggml-base.bin \
+  -e TA_SCAN_INTERVAL_SECS=5 \
+  transcription-agent:local
+
+podman logs -f transcription-agent
+podman stop transcription-agent    # clean shutdown; `podman start transcription-agent` to resume
+podman rm -f transcription-agent   # remove it (e.g. before re-running with a new image)
+```
+
+After a Mac reboot the VM is not running: run `podman machine start`, then
+`podman start transcription-agent` (or `podman compose up -d`).
+To change the model, add `TA_MODEL=/models/ggml-small.bin` to `.env` (compose)
+or change the `-e TA_MODEL=...` option (plain Podman).
 
 ## Output
 
@@ -80,6 +140,14 @@ To use another model: `scripts/download-model.sh small`, then set
 `TA_MODEL=/models/ggml-small.bin` in `.env`.
 
 ## Troubleshooting
+
+- **Podman: `permission denied` writing to `/data` or the folders appear
+  owned by a strange uid**: `.env` must come from `scripts/setup.sh --podman`
+  (`HOST_UID=0`), then recreate the container. Also check that the folder is
+  inside your home folder (the only one `podman machine` shares by default) and
+  that `podman machine` is running (`podman machine list`).
+- **Podman: `podman compose` fails on `build.platforms` or other keys**: use the
+  plain `podman build` / `podman run` commands above instead.
 
 - **`model not found`**: run `scripts/download-model.sh base`.
 - **A file stays in `new-audio-files/`**: check `docker compose logs`. A file

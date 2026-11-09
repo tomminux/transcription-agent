@@ -69,6 +69,8 @@ docker compose build          # build the linux/amd64 image
 docker compose up -d          # run the agent in the background
 docker compose logs -f        # follow the logs
 docker compose down           # stop it
+# Podman on macOS: `scripts/setup.sh --podman` (HOST_UID=0, rootless maps it to the Mac user),
+# then `podman compose ...` or plain `podman build/run` (see README). Not tested on a Mac yet.
 ```
 
 Build prerequisites for `whisper-rs`: `cmake`, a C/C++ toolchain and `clang`/`libclang` (bindgen; set `LIBCLANG_PATH` if it is not found). Inside the container these are provided by the builder stage, so nothing needs to be installed on the Mac except Docker (or Colima/Podman).
