@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-# Build for linux/amd64 (Intel Mac): docker compose build
+# Builds natively for the machine's architecture: arm64 on Apple Silicon (podman/docker
+# machine VM), amd64 on x86 Linux. Do not force --platform linux/amd64 on a Mac
+# with Apple Silicon: it would run under slow emulation.
 
 FROM rust:slim-bookworm AS builder
 # whisper-rs builds whisper.cpp with cmake + a C++ toolchain, and generates
@@ -9,22 +11,27 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# Portable x86_64 baseline (not -march=native): the image must run on any Intel
-# Mac with AVX2 (2013+), whatever machine built it. GGML_* vars go to cmake.
-ENV GGML_NATIVE=OFF \
-    GGML_AVX=ON \
-    GGML_AVX2=ON \
-    GGML_FMA=ON \
-    GGML_F16C=ON
+# Portable CPU baselines (not -march=native), so the image runs on any CPU of
+# the same architecture whatever machine built it. GGML_* env vars are forwarded
+# to cmake by whisper-rs-sys; the flags are written to a file because they
+# depend on the architecture and must apply to both cargo builds below.
+#   amd64: AVX2 + FMA + F16C (Intel Macs from 2013, any modern x86 PC)
+#   arm64: armv8.2-a + dotprod + fp16 (every Apple M1..M5; NEON, no Metal in a VM)
+RUN case "$(uname -m)" in \
+      x86_64)  echo 'export GGML_NATIVE=OFF GGML_AVX=ON GGML_AVX2=ON GGML_FMA=ON GGML_F16C=ON' ;; \
+      aarch64) echo 'export GGML_NATIVE=OFF GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16' ;; \
+      *)       echo 'export GGML_NATIVE=OFF' ;; \
+    esac > /etc/ggml-env.sh
 
 # Build dependencies first so they are cached until Cargo.toml/Cargo.lock change.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs \
+RUN . /etc/ggml-env.sh \
+    && mkdir src && echo 'fn main() {}' > src/main.rs \
     && cargo build --release \
     && rm -rf src target/release/transcription-agent* target/release/deps/transcription_agent*
 
 COPY src ./src
-RUN cargo build --release
+RUN . /etc/ggml-env.sh && cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 # ffmpeg: fallback decoder for AAC variants the built-in decoder rejects (HE-AAC, multichannel...).

@@ -6,7 +6,7 @@ mod watcher;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use config::Config;
@@ -60,6 +60,7 @@ fn main() -> anyhow::Result<()> {
             tracing::debug!(file = %path.display(), "file disappeared, skipping");
             continue;
         }
+        let started = Instant::now();
         let audio = match decoder::decode_file(&path) {
             Ok(a) => a,
             Err(e) => {
@@ -98,6 +99,9 @@ fn main() -> anyhow::Result<()> {
                 file = %path.display(),
                 transcription = %md.display(),
                 duration_secs = audio.duration_secs(),
+                // Processing time and speed (x real time): handy to compare models.
+                elapsed_secs = started.elapsed().as_secs_f64().round(),
+                speed = %format!("{:.1}x", audio.duration_secs() / started.elapsed().as_secs_f64().max(0.001)),
                 language = %transcript.language,
                 segments = transcript.segments.len(),
                 chars = transcript.text().chars().count(),

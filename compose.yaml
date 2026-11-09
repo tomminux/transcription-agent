@@ -1,11 +1,9 @@
 services:
   transcription-agent:
+    # No `platform:` pin: build and run natively (arm64 on Apple Silicon).
     build:
       context: .
-      platforms:
-        - linux/amd64
     image: transcription-agent:local
-    platform: linux/amd64
     restart: unless-stopped
     init: true # reaps zombies and forwards SIGTERM
     # Run as the Mac user so files written to the mounted folders belong to you.

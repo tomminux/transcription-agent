@@ -8,7 +8,7 @@ Supported inputs:
 - `.m4a` recorded with QuickTime Player on macOS
 - Audio recorded on iPhone with the Voice Memos app (`.m4a`, possibly shared/AirDropped/synced into the folder)
 
-Target runtime: a **Linux x86_64 container** running on an **Intel Mac** (via Docker Desktop, Colima or Podman). The agent is not meant to run natively on macOS. The audio files live on the Mac and are shared with the container through bind mounts. Development happens on Linux, where the same container can be built and tested.
+Target runtime: a **Linux container** (built natively for the host architecture: **arm64** on an **Apple Silicon Mac, M5** with **Podman**, which is the main target; amd64 on x86 Linux / Intel Macs, e.g. the dev machine). The agent is not meant to run natively on macOS. The audio files live on the Mac and are shared with the container through bind mounts. Development happens on Linux x86, where the container can be built and tested; the arm64 build cannot be tested there (no emulation) and must be verified on the Mac.
 
 ## Workflow
 
@@ -25,13 +25,13 @@ Directories (at repo root, contents are gitignored, `.gitkeep` keeps them in git
 ## Decisions made
 
 - **Language:** Rust (stable, edition 2021+).
-- **Engine:** local whisper.cpp via the `whisper-rs` crate. Offline, no cloud. Intel Mac means CPU inference only (no Metal gain), so default to a modest model (`base` or `small`, multilingual, optionally quantized) and keep the model path configurable. Models live in `models/` (gitignored), never committed.
+- **Engine:** local whisper.cpp via the `whisper-rs` crate. Offline, no cloud. CPU inference only: containers on macOS run in a Linux VM with no Metal/GPU access (Apple Silicon uses NEON/dotprod/fp16 on the CPU, much faster than the old Intel Mac). Default to `base`, recommend `small` on Apple Silicon (multilingual, optionally quantized); keep the model path configurable. Each processed file logs `elapsed_secs` and `speed` to compare models. Models live in `models/` (gitignored), never committed.
 - **Language handling:** auto-detect per file (use multilingual models, not `.en`).
 - **Audio decoding:** pure Rust first: `symphonia` (AAC-LC in MP4/M4A) + resample to 16 kHz mono f32 (`rubato`) before feeding Whisper. `symphonia` rejects HE-AAC/SBR, >2 channels and non-1024 frame AAC ("aac too complex"), so those files fall back to the `ffmpeg` binary (installed in the image; decodes straight to 16 kHz mono f32 via a pipe). The whole decoded file is held in memory (~230 MB per hour of audio).
 - **Folder watching:** `notify` crate. Must also scan the folder at startup for files already present. Wait until a file's size is stable before processing, since Voice Memos/QuickTime/AirDrop may still be writing it.
 - **Output format:** Markdown with YAML front matter (source filename, date, duration, detected language, model) followed by one line per Whisper segment: `[HH:MM:SS - HH:MM:SS] text` (timestamps help later LLM analysis such as speaker labelling/summaries). `Transcript` holds `segments` plus `text()` for the plain joined text.
 - **Background execution:** the agent runs in a container (replaces the earlier "manual run / launchd" plan). The binary stays a plain foreground process (PID 1 in the container); `docker compose up -d` with `restart: unless-stopped` keeps it running in the background and restarts it after a crash or reboot. Do not build daemonization into the binary, and do not add launchd.
-- **Container packaging:** multi-stage `Dockerfile` (Rust builder with `cmake` + C++ toolchain, slim Debian runtime) and a `compose.yaml`. Keep it runtime-agnostic (no Docker-only features) so Docker Desktop, Colima and Podman all work. Build for `linux/amd64`.
+- **Container packaging:** multi-stage `Dockerfile` (Rust builder with `cmake` + C++ toolchain, slim Debian runtime) and a `compose.yaml`. Keep it runtime-agnostic (no Docker-only features) so Docker Desktop, Colima and Podman all work. Build natively for the host architecture: never pin `platform: linux/amd64` (on Apple Silicon that means slow emulation), and never pass `--platform linux/amd64` to podman/docker on the Mac.
 
 ## Container constraints (important)
 
@@ -40,8 +40,8 @@ Directories (at repo root, contents are gitignored, `.gitkeep` keeps them in git
 - **Moves:** since all three folders are under one mount, `rename()` works. Still keep a fallback to copy + fsync + delete on `EXDEV` (only delete the source after a successful copy), in case the folders are configured on separate mounts.
 - **Configuration through environment variables** as well as CLI flags (clap `env`), with container defaults pointing at `/data/...` and `/models/...`.
 - **Permissions:** run as a non-root user; support mapping the host UID/GID (`user: "${HOST_UID}:${HOST_GID}"` in compose, values come from a gitignored `.env` written by `scripts/setup.sh`; do not use `UID`, it is a read-only shell variable and not exported) so files written to the Mac folders are owned by the Mac user.
-- **CPU build:** do not build the image with `-C target-cpu=native` / host-specific whisper.cpp flags (the build machine may differ from the run machine). The Dockerfile sets `GGML_NATIVE=OFF` plus `GGML_AVX/AVX2/FMA/F16C=ON` (env vars starting with `GGML_` are forwarded to cmake by `whisper-rs-sys`), so the image needs an Intel Mac with AVX2 (2013+).
-- **Resources:** Whisper is CPU- and memory-heavy; document the Docker Desktop CPU/RAM limits needed for the chosen model (`base` ~1 GB, `small` ~2 GB).
+- **CPU build:** do not build the image with `-C target-cpu=native` / host-specific whisper.cpp flags (the build machine may differ from the run machine). The Dockerfile picks flags by `uname -m` and writes them to `/etc/ggml-env.sh` (sourced by both cargo builds; env vars starting with `GGML_` are forwarded to cmake by `whisper-rs-sys`): x86_64 → `GGML_NATIVE=OFF` + `GGML_AVX/AVX2/FMA/F16C=ON` (needs AVX2, 2013+); aarch64 → `GGML_NATIVE=OFF` + `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16` (every Apple M1..M5; i8mm/SVE/SME are deliberately not enabled). The aarch64 branch is untested until built on the Mac.
+- **Resources:** Whisper is CPU- and memory-heavy; document the VM CPU/RAM limits needed for the chosen model (`base` ~1 GB, `small` ~2 GB; `podman machine init --cpus 4 --memory 4096`). More threads than the chip's performance cores rarely help.
 - **Logs** go to stdout/stderr (`docker compose logs -f`), not to files.
 - **Graceful shutdown:** handle SIGTERM (container stop). Finish or abandon the current file safely; the audio stays in `new-audio-files/` unless fully processed.
 
@@ -65,7 +65,7 @@ cargo fmt --check
 cargo clippy -- -D warnings
 
 scripts/setup.sh              # write .env (uid/gid, data dir) and create folders
-docker compose build          # build the linux/amd64 image
+docker compose build          # build the image for the host architecture
 docker compose up -d          # run the agent in the background
 docker compose logs -f        # follow the logs
 docker compose down           # stop it

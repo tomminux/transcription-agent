@@ -3,7 +3,9 @@
 A background agent that transcribes audio recordings **locally** (no cloud):
 QuickTime Player `.m4a` files and iPhone Voice Memos.
 
-It runs in a Linux container (built for an Intel Mac) and watches a folder.
+It runs in a Linux container and watches a folder. The image is built natively
+for the machine's architecture: **arm64 on Apple Silicon Macs** (the main target,
+with Podman), amd64 on x86 machines (Intel Macs, Linux).
 For each new audio file it writes a Markdown transcription and moves the audio
 out of the way:
 
@@ -12,11 +14,13 @@ new-audio-files/  ──►  transcriptions/<name>.md
                   └──►  transcribed-audio-files/<name>.m4a
 ```
 
-Audio is decoded in-process; files that variant the built-in decoder rejects
+Audio is decoded in-process; files that the built-in decoder rejects
 (HE-AAC, multichannel...) are decoded with `ffmpeg`, which is in the image.
-The language is detected automatically. Transcription uses whisper.cpp
-(CPU only), so expect it to take a fraction of the recording's length to a bit
-more than real time, depending on the model.
+The language is detected automatically. Transcription uses whisper.cpp on the
+CPU: a container on macOS runs in a Linux VM with no access to the Mac's GPU
+(no Metal). Apple Silicon CPUs are still fast, and the log line printed for each
+file shows the processing time and speed (e.g. `speed=4.2x` = 4.2 times faster
+than the recording length), so you can compare models on your own audio.
 
 ## Run it with Docker (Mac with Docker Desktop or Colima)
 
@@ -37,7 +41,9 @@ being transcribed stays in `new-audio-files/` and is picked up on the next
 start).
 
 Give Docker at least 2 CPUs and 2 GB RAM (`base` needs ~1 GB, `small` ~2 GB).
-The image needs a CPU with AVX2 (Intel Macs from 2013 on).
+On x86 the image needs a CPU with AVX2 (Intel Macs from 2013 on). On Apple
+Silicon it is a native arm64 build; do not force `--platform linux/amd64`
+(that would run under slow emulation).
 
 ## Run it with Podman (macOS)
 
@@ -45,11 +51,14 @@ The image needs a CPU with AVX2 (Intel Macs from 2013 on).
 > tell us what you got.
 
 Podman on macOS runs containers inside a small Linux VM (`podman machine`).
-On an Intel Mac the VM is x86_64, so the `linux/amd64` image runs natively.
+On an Apple Silicon Mac (M1...M5) the VM is **arm64**, so the image is built
+and runs natively (the Dockerfile picks arm64 CPU flags automatically). Never
+pass `--platform linux/amd64`: it would run under emulation and be very slow.
 
 ```bash
-# 1. Install and create the VM (once). CPUs/RAM go to the VM: Whisper needs
-#    at least 2 CPUs and 2 GB (use 4096 for the `small` model).
+# 1. Install and create the VM (once). CPUs/RAM go to the VM. Whisper needs
+#    at least 2 CPUs and 2 GB RAM (4096 MB for the `small` model). More threads
+#    than the chip has performance cores rarely help (e.g. --cpus 4).
 brew install podman
 podman machine init --cpus 4 --memory 4096
 podman machine start
@@ -59,7 +68,7 @@ podman machine start
 #    yours. (Do not use your own uid here: it would map to an unrelated uid.)
 git clone git@github.com:tomminux/transcription-agent.git && cd transcription-agent
 scripts/setup.sh --podman
-scripts/download-model.sh base
+scripts/download-model.sh small    # `base` is faster but less accurate; `small` is a good fit for an M-series CPU
 ```
 
 The default `podman machine` shares your home folder (`/Users/paolo`) with the
@@ -78,14 +87,13 @@ podman compose down                # stop
 **or** with plain Podman (no compose needed):
 
 ```bash
-podman build --platform linux/amd64 -t transcription-agent:local .
+podman build -t transcription-agent:local .
 
 DATA=/Users/paolo/docker-host-containers/transcription-agent
 podman run -d --name transcription-agent --restart unless-stopped --init \
-  --platform linux/amd64 \
   -v "$DATA":/data \
   -v "$PWD/models":/models:ro \
-  -e TA_MODEL=/models/ggml-base.bin \
+  -e TA_MODEL=/models/ggml-small.bin \
   -e TA_SCAN_INTERVAL_SECS=5 \
   transcription-agent:local
 
@@ -146,8 +154,12 @@ To use another model: `scripts/download-model.sh small`, then set
   (`HOST_UID=0`), then recreate the container. Also check that the folder is
   inside your home folder (the only one `podman machine` shares by default) and
   that `podman machine` is running (`podman machine list`).
-- **Podman: `podman compose` fails on `build.platforms` or other keys**: use the
-  plain `podman build` / `podman run` commands above instead.
+- **Podman: `podman compose` fails on a compose key**: use the plain
+  `podman build` / `podman run` commands above instead.
+- **Very slow, or `exec format error`**: the image was built for the wrong
+  architecture (e.g. with `--platform linux/amd64`). Check with
+  `podman image inspect transcription-agent:local --format '{{.Architecture}}'`
+  (it must be `arm64` on Apple Silicon), then rebuild without `--platform`.
 
 - **`model not found`**: run `scripts/download-model.sh base`.
 - **A file stays in `new-audio-files/`**: check `docker compose logs`. A file
