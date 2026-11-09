@@ -28,6 +28,7 @@ HOST_GID=$gid
 HOST_DATA_DIR=$data_dir
 HOST_MODELS_DIR=$root/models
 # TA_MODEL=/models/ggml-small.bin
+# TA_LANGUAGE=it,en   # auto | it | it,en (detect only among these)
 # TA_SCAN_INTERVAL_SECS=5
 # RUST_LOG=info
 ENV

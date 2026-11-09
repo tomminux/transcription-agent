@@ -11,6 +11,7 @@ services:
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       TA_MODEL: "${TA_MODEL:-/models/ggml-base.bin}"
+      TA_LANGUAGE: "${TA_LANGUAGE:-auto}"
       TA_SCAN_INTERVAL_SECS: "${TA_SCAN_INTERVAL_SECS:-5}"
       RUST_LOG: "${RUST_LOG:-info}"
     volumes:

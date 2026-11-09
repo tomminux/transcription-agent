@@ -141,8 +141,18 @@ Environment variables (set in `.env`) or CLI flags:
 | `HOST_DATA_DIR` | `/Users/paolo/docker-host-containers/transcription-agent` | Host folder holding the three subfolders (mounted at `/data`) |
 | `HOST_MODELS_DIR` | `./models` | Host folder with the ggml models (mounted read-only at `/models`) |
 | `TA_MODEL` | `/models/ggml-base.bin` | Model file (e.g. `ggml-small.bin` for better accuracy) |
+| `TA_LANGUAGE` | `auto` | Spoken language: `auto`, one code (`it`), or a list (`it,en`) to detect only among those |
 | `TA_SCAN_INTERVAL_SECS` | `5` | How often the input folder is rescanned |
 | `RUST_LOG` | `info` | Log level |
+
+**Language.** `auto` lets Whisper guess from the first 30 seconds only. A silent
+or noisy intro, music, or a small model can make it pick the wrong language (we
+saw a recording detected as Vietnamese), and then the whole transcript is wrong.
+If you know which languages you record, set them: `TA_LANGUAGE=it` forces one
+language, and `TA_LANGUAGE=it,en` detects the language **only among those**,
+sampling 5 points spread over the recording (the log line `language detection
+among candidates ...` shows the probability of each). The detected language is
+written in the front matter.
 
 To use another model: `scripts/download-model.sh small`, then set
 `TA_MODEL=/models/ggml-small.bin` in `.env`.

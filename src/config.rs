@@ -25,6 +25,12 @@ pub struct Config {
     #[arg(long, env = "TA_MODEL", default_value = "models/ggml-base.bin")]
     pub model: PathBuf,
 
+    /// Spoken language: `auto` (Whisper decides from the first 30 s, can be
+    /// wrong), a code like `it`, or a list like `it,en` (detect only among
+    /// these, sampling several points of the recording).
+    #[arg(long, env = "TA_LANGUAGE", default_value = "auto")]
+    pub language: String,
+
     /// Seconds between rescans of the input folder. Needed because file
     /// events from a macOS host often do not reach a container.
     #[arg(long, env = "TA_SCAN_INTERVAL_SECS", default_value_t = 5)]
@@ -54,6 +60,7 @@ mod tests {
         assert_eq!(c.output_dir, PathBuf::from("transcriptions"));
         assert_eq!(c.done_dir, PathBuf::from("transcribed-audio-files"));
         assert_eq!(c.scan_interval_secs, 5);
+        assert_eq!(c.language, "auto");
     }
 
     #[test]

@@ -30,8 +30,13 @@ fn main() -> anyhow::Result<()> {
     }
 
     whisper_rs::install_logging_hooks();
-    let transcriber = transcriber::Transcriber::new(&config.model)?;
-    tracing::info!(model = %config.model.display(), "model loaded");
+    let language = transcriber::LanguageMode::parse(&config.language)?;
+    let transcriber = transcriber::Transcriber::new(&config.model, language)?;
+    tracing::info!(
+        model = %config.model.display(),
+        language = %config.language,
+        "model loaded"
+    );
 
     // Keep `_watcher` alive: dropping it stops the events.
     let (_watcher, mut queue) = watcher::watch(
