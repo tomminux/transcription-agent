@@ -14,6 +14,13 @@ services:
       TA_LANGUAGE: "${TA_LANGUAGE:-auto}"
       TA_SCAN_INTERVAL_SECS: "${TA_SCAN_INTERVAL_SECS:-5}"
       RUST_LOG: "${RUST_LOG:-info}"
+      # Meeting report (off by default). See README "Meeting reports".
+      TA_LLM: "${TA_LLM:-none}"
+      TA_LLM_MODEL: "${TA_LLM_MODEL:-}"
+      TA_LLM_URL: "${TA_LLM_URL:-}"
+      TA_LLM_NUM_CTX: "${TA_LLM_NUM_CTX:-32768}"
+      TA_REPORT_LANGUAGE: "${TA_REPORT_LANGUAGE:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     volumes:
       # One parent folder holding new-audio-files/, transcriptions/ and
       # transcribed-audio-files/ (created by the agent if missing).

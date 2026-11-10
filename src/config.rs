@@ -35,6 +35,37 @@ pub struct Config {
     /// events from a macOS host often do not reach a container.
     #[arg(long, env = "TA_SCAN_INTERVAL_SECS", default_value_t = 5)]
     pub scan_interval_secs: u64,
+
+    /// LLM used to turn each transcription into a meeting report: `none`
+    /// (default), `ollama` (local model) or `anthropic` (Claude API: the
+    /// transcript is sent to Anthropic).
+    #[arg(long, env = "TA_LLM", default_value = "none")]
+    pub llm: String,
+
+    /// Model name (anthropic default: claude-opus-5-5; ollama: required).
+    #[arg(long, env = "TA_LLM_MODEL")]
+    pub llm_model: Option<String>,
+
+    /// Base URL of the LLM server (ollama default:
+    /// http://host.containers.internal:11434).
+    #[arg(long, env = "TA_LLM_URL")]
+    pub llm_url: Option<String>,
+
+    /// API key for `anthropic`.
+    #[arg(long, env = "ANTHROPIC_API_KEY", hide_env_values = true)]
+    pub anthropic_api_key: Option<String>,
+
+    /// Context window requested from Ollama (it truncates silently beyond it).
+    #[arg(long, env = "TA_LLM_NUM_CTX", default_value_t = 32768)]
+    pub llm_num_ctx: u32,
+
+    /// Timeout for one LLM request, in seconds.
+    #[arg(long, env = "TA_LLM_TIMEOUT_SECS", default_value_t = 900)]
+    pub llm_timeout_secs: u64,
+
+    /// Language of the report, e.g. `Italian`; empty = same as the transcript.
+    #[arg(long, env = "TA_REPORT_LANGUAGE", default_value = "")]
+    pub report_language: String,
 }
 
 impl Config {
@@ -61,6 +92,7 @@ mod tests {
         assert_eq!(c.done_dir, PathBuf::from("transcribed-audio-files"));
         assert_eq!(c.scan_interval_secs, 5);
         assert_eq!(c.language, "auto");
+        assert_eq!(c.llm, "none");
     }
 
     #[test]

@@ -144,6 +144,12 @@ Environment variables (set in `.env`) or CLI flags:
 | `TA_LANGUAGE` | `auto` | Spoken language: `auto`, one code (`it`), or a list (`it,en`) to detect only among those |
 | `TA_SCAN_INTERVAL_SECS` | `5` | How often the input folder is rescanned |
 | `RUST_LOG` | `info` | Log level |
+| `TA_LLM` | `none` | Meeting report backend: `none`, `ollama`, `anthropic` |
+| `TA_LLM_MODEL` | `claude-opus-5-5` (anthropic) | Model name (required for ollama) |
+| `TA_LLM_URL` | per backend | Ollama default `http://host.containers.internal:11434` |
+| `TA_LLM_NUM_CTX` | `32768` | Ollama context window |
+| `TA_REPORT_LANGUAGE` | transcript's | e.g. `Italian` |
+| `ANTHROPIC_API_KEY` | | API key for `anthropic` |
 
 **Language.** `auto` lets Whisper guess from the first 30 seconds only. A silent
 or noisy intro, music, or a small model can make it pick the wrong language (we
@@ -156,6 +162,43 @@ written in the front matter.
 
 To use another model: `scripts/download-model.sh small`, then set
 `TA_MODEL=/models/ggml-small.bin` in `.env`.
+
+## Meeting reports (optional)
+
+With an LLM enabled, each new transcription also gets a report,
+`transcriptions/<name>-report.md`: summary, participants (a best guess, the
+transcript has no speaker labels), topics with timestamps, decisions, action
+items, open questions. It is **off by default**. The transcription and the audio
+are saved first, so an LLM failure only logs an error and never loses anything.
+At startup the agent also writes reports for existing transcriptions that have
+none (this is also how a failed one is retried: restart the container).
+
+**Local, private (Ollama on the Mac).** Nothing leaves the machine:
+
+```
+TA_LLM=ollama
+TA_LLM_MODEL=qwen3:14b      # any model you pulled with `ollama pull`
+```
+
+Ollama must listen where the container can reach it. From a Podman container the
+Mac is `host.containers.internal` (the default `TA_LLM_URL` is
+`http://host.containers.internal:11434`); with Docker use
+`TA_LLM_URL=http://host.docker.internal:11434`. Ollama binds to 127.0.0.1 by
+default, which the VM cannot reach: start it with `OLLAMA_HOST=0.0.0.0` (or
+`launchctl setenv OLLAMA_HOST 0.0.0.0` and restart the app). `TA_LLM_NUM_CTX`
+(default 32768) matters: Ollama silently truncates anything beyond its context
+window, and an hour of speech is roughly 15-20k tokens.
+
+**Claude API (better reports, the transcript is sent to Anthropic):**
+
+```
+TA_LLM=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+TA_LLM_MODEL=claude-opus-5-5    # default; e.g. claude-sonnet-5-5 is cheaper
+```
+
+`TA_REPORT_LANGUAGE=Italian` forces the report language (default: the
+transcript's). Only the transcription Markdown is sent, never the audio.
 
 ## Troubleshooting
 

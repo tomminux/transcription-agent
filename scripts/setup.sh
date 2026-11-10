@@ -31,6 +31,12 @@ HOST_MODELS_DIR=$root/models
 # TA_LANGUAGE=it,en   # auto | it | it,en (detect only among these)
 # TA_SCAN_INTERVAL_SECS=5
 # RUST_LOG=info
+# Meeting report from each transcription (off by default):
+# TA_LLM=ollama            # local model, nothing leaves the Mac
+# TA_LLM_MODEL=qwen3:14b   # a model you have pulled with `ollama pull`
+# TA_LLM=anthropic         # Claude API: the transcript is SENT to Anthropic
+# ANTHROPIC_API_KEY=sk-ant-...
+# TA_REPORT_LANGUAGE=Italian
 ENV
 
 mkdir -p "$data_dir/new-audio-files" "$data_dir/transcriptions" "$data_dir/transcribed-audio-files"

@@ -1,6 +1,7 @@
 mod config;
 mod decoder;
 mod output;
+mod summarizer;
 mod transcriber;
 mod watcher;
 
@@ -46,6 +47,19 @@ fn main() -> anyhow::Result<()> {
     tracing::info!(dir = %config.input_dir.display(), "watching for new audio files");
 
     let mut failures = watcher::FailureTracker::default();
+
+    let summarizer = summarizer::Summarizer::from_config(&config)?;
+    if let Some(s) = &summarizer {
+        tracing::info!(llm = %s.describe(), "meeting reports enabled");
+        // Backfill: transcriptions without a report (older files, or an LLM
+        // failure last time). A failure is logged and not retried until restart.
+        for md in summarizer::missing_reports(&config.output_dir) {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            report(s, &md);
+        }
+    }
 
     let model_name = config
         .model
@@ -100,7 +114,8 @@ fn main() -> anyhow::Result<()> {
             &meta,
         ) {
             // Never log transcript text: it is private.
-            Ok(md) => tracing::info!(
+            Ok(md) => {
+                tracing::info!(
                 file = %path.display(),
                 transcription = %md.display(),
                 duration_secs = audio.duration_secs(),
@@ -111,7 +126,11 @@ fn main() -> anyhow::Result<()> {
                 segments = transcript.segments.len(),
                 chars = transcript.text().chars().count(),
                 "transcribed and moved"
-            ),
+                );
+                if let Some(s) = &summarizer {
+                    report(s, &md);
+                }
+            }
             Err(e) => {
                 tracing::error!(file = %path.display(), "saving result failed: {e:#}");
                 failures.record(&path);
@@ -122,4 +141,21 @@ fn main() -> anyhow::Result<()> {
         tracing::info!("shutdown requested, exiting cleanly");
     }
     Ok(())
+}
+
+/// Writes the report for one transcription; failures are logged only (the
+/// transcription and the audio are already safe).
+fn report(summarizer: &summarizer::Summarizer, transcription: &std::path::Path) {
+    let started = Instant::now();
+    match summarizer::write_report(summarizer, transcription) {
+        Ok(path) => tracing::info!(
+            report = %path.display(),
+            elapsed_secs = started.elapsed().as_secs_f64().round(),
+            "meeting report written"
+        ),
+        Err(e) => tracing::error!(
+            transcription = %transcription.display(),
+            "meeting report failed: {e:#}"
+        ),
+    }
 }

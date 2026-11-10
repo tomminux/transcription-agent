@@ -26,7 +26,7 @@ pub struct Meta<'a> {
 }
 
 /// Quotes a string as a YAML double-quoted scalar (safe for any content).
-fn yaml_quote(s: &str) -> String {
+pub(crate) fn yaml_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
@@ -107,7 +107,7 @@ fn unique_stem(output_dir: &Path, done_dir: &Path, stem: &str, audio_ext: &str) 
 
 /// Writes `data` to `dest` through a hidden temp file in the same folder,
 /// fsyncs it, then renames it into place.
-fn write_atomic(dest: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(dest: &Path, data: &[u8]) -> Result<()> {
     let tmp = tmp_path(dest);
     let result = (|| -> io::Result<()> {
         let mut f = File::create(&tmp)?;
