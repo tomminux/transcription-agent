@@ -18,6 +18,8 @@ services:
       TA_LLM: "${TA_LLM:-none}"
       TA_LLM_MODEL: "${TA_LLM_MODEL:-}"
       TA_LLM_URL: "${TA_LLM_URL:-}"
+      TA_LLM_API_KEY: "${TA_LLM_API_KEY:-}"
+      TA_LLM_CA_CERT: "${TA_LLM_CA_CERT:-}"
       TA_LLM_NUM_CTX: "${TA_LLM_NUM_CTX:-32768}"
       TA_REPORT_LANGUAGE: "${TA_REPORT_LANGUAGE:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"

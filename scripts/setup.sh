@@ -32,6 +32,11 @@ HOST_MODELS_DIR=$root/models
 # TA_SCAN_INTERVAL_SECS=5
 # RUST_LOG=info
 # Meeting report from each transcription (off by default):
+# TA_LLM=openai            # private OpenAI-compatible server (intranet/VPN)
+# TA_LLM_URL=https://llm.intranet/v1
+# TA_LLM_MODEL=<model name the server exposes>
+# TA_LLM_API_KEY=...
+# TA_LLM_CA_CERT=/models/intranet-ca.pem   # only if the server uses a private CA
 # TA_LLM=ollama            # local model, nothing leaves the Mac
 # TA_LLM_MODEL=qwen3:14b   # a model you have pulled with `ollama pull`
 # TA_LLM=anthropic         # Claude API: the transcript is SENT to Anthropic

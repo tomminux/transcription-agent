@@ -37,8 +37,9 @@ pub struct Config {
     pub scan_interval_secs: u64,
 
     /// LLM used to turn each transcription into a meeting report: `none`
-    /// (default), `ollama` (local model) or `anthropic` (Claude API: the
-    /// transcript is sent to Anthropic).
+    /// (default), `openai` (any OpenAI-compatible server, e.g. a private one),
+    /// `ollama` (local model) or `anthropic` (Claude API: the transcript is
+    /// sent to Anthropic).
     #[arg(long, env = "TA_LLM", default_value = "none")]
     pub llm: String,
 
@@ -50,6 +51,14 @@ pub struct Config {
     /// http://host.containers.internal:11434).
     #[arg(long, env = "TA_LLM_URL")]
     pub llm_url: Option<String>,
+
+    /// API key for the `openai`-compatible private server (sent as a Bearer token).
+    #[arg(long, env = "TA_LLM_API_KEY", hide_env_values = true)]
+    pub llm_api_key: Option<String>,
+
+    /// PEM file with the CA certificate of an intranet HTTPS server.
+    #[arg(long, env = "TA_LLM_CA_CERT")]
+    pub llm_ca_cert: Option<PathBuf>,
 
     /// API key for `anthropic`.
     #[arg(long, env = "ANTHROPIC_API_KEY", hide_env_values = true)]

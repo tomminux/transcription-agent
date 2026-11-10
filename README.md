@@ -144,11 +144,13 @@ Environment variables (set in `.env`) or CLI flags:
 | `TA_LANGUAGE` | `auto` | Spoken language: `auto`, one code (`it`), or a list (`it,en`) to detect only among those |
 | `TA_SCAN_INTERVAL_SECS` | `5` | How often the input folder is rescanned |
 | `RUST_LOG` | `info` | Log level |
-| `TA_LLM` | `none` | Meeting report backend: `none`, `ollama`, `anthropic` |
+| `TA_LLM` | `none` | Meeting report backend: `none`, `openai` (private server), `ollama`, `anthropic` |
 | `TA_LLM_MODEL` | `claude-opus-5-5` (anthropic) | Model name (required for ollama) |
 | `TA_LLM_URL` | per backend | Ollama default `http://host.containers.internal:11434` |
 | `TA_LLM_NUM_CTX` | `32768` | Ollama context window |
 | `TA_REPORT_LANGUAGE` | transcript's | e.g. `Italian` |
+| `TA_LLM_API_KEY` | | Bearer key for `openai` |
+| `TA_LLM_CA_CERT` | | PEM of a private CA (e.g. `/models/intranet-ca.pem`) |
 | `ANTHROPIC_API_KEY` | | API key for `anthropic` |
 
 **Language.** `auto` lets Whisper guess from the first 30 seconds only. A silent
@@ -172,6 +174,31 @@ items, open questions. It is **off by default**. The transcription and the audio
 are saved first, so an LLM failure only logs an error and never loses anything.
 At startup the agent also writes reports for existing transcriptions that have
 none (this is also how a failed one is retried: restart the container).
+
+**Private server on the intranet / VPN (OpenAI-compatible API: vLLM, LiteLLM,
+llama.cpp server, ...):**
+
+```
+TA_LLM=openai
+TA_LLM_URL=https://llm.intranet/v1          # base URL; /chat/completions is appended
+TA_LLM_MODEL=<model name the server exposes>
+TA_LLM_API_KEY=...                          # sent as "Authorization: Bearer ..."
+TA_LLM_CA_CERT=/models/intranet-ca.pem      # only if the server uses a private CA
+```
+
+The container reaches the server through the Mac's network, so the VPN must be
+up on the Mac. With Podman, the VM follows the Mac's routes but may not use the
+VPN's DNS: if the name does not resolve, use the server's IP. To test from the
+same network namespace as the agent:
+
+```
+podman run --rm docker.io/curlimages/curl -sS -H "Authorization: Bearer $KEY" https://llm.intranet/v1/models
+```
+
+A private CA certificate (PEM) can be put in the `models/` folder, which is
+already mounted at `/models`, and referenced by `TA_LLM_CA_CERT`. It replaces
+the public roots for this connection only. Models that print their reasoning
+inside `<think>...</think>` are cleaned automatically.
 
 **Local, private (Ollama on the Mac).** Nothing leaves the machine:
 
