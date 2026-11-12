@@ -19,7 +19,9 @@ services:
       TA_LLM_MODEL: "${TA_LLM_MODEL:-}"
       TA_LLM_URL: "${TA_LLM_URL:-}"
       TA_LLM_API_KEY: "${TA_LLM_API_KEY:-}"
-      TA_LLM_CA_CERT: "${TA_LLM_CA_CERT:-}"
+      # Never empty: an empty value breaks older images. The default is the
+      # image's system CA bundle (same as public roots plus none of yours).
+      TA_LLM_CA_CERT: "${TA_LLM_CA_CERT:-/etc/ssl/certs/ca-certificates.crt}"
       TA_LLM_NUM_CTX: "${TA_LLM_NUM_CTX:-32768}"
       TA_REPORT_LANGUAGE: "${TA_REPORT_LANGUAGE:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"

@@ -646,6 +646,29 @@ mod tests {
     }
 
     #[test]
+    fn system_ca_bundle_loads_and_works() {
+        // compose defaults TA_LLM_CA_CERT to the image's system bundle.
+        let bundle = "/etc/ssl/certs/ca-certificates.crt";
+        if !Path::new(bundle).exists() {
+            return;
+        }
+        let cfg = Config::parse_from([
+            "x",
+            "--llm",
+            "openai",
+            "--llm-url",
+            "http://127.0.0.1:1/v1",
+            "--llm-model",
+            "m",
+            "--llm-ca-cert",
+            bundle,
+        ]);
+        let s = Summarizer::from_config(&cfg).unwrap().unwrap();
+        // Plain HTTP to a closed port: must fail with a connection error, not a TLS setup panic.
+        assert!(s.summarize("t").is_err());
+    }
+
+    #[test]
     fn blank_ca_cert_is_ignored() {
         let cfg = Config::parse_from([
             "x",
