@@ -126,7 +126,13 @@ impl Summarizer {
         let mut builder = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(config.llm_timeout_secs.max(10))))
             .http_status_as_error(false);
-        if let Some(ca) = config.llm_ca_cert.as_ref() {
+        if let Some(ca) = config
+            .llm_ca_cert
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(Path::new)
+        {
             // Private CA of an intranet server: trust it (in addition to nothing
             // else: the pinned set replaces the public roots for this client).
             let pem = std::fs::read(ca)
@@ -637,6 +643,22 @@ mod tests {
         let err = summarizer("anthropic", &url).summarize("t").unwrap_err();
         h.join().unwrap();
         assert!(format!("{err:#}").contains("HTTP 401"));
+    }
+
+    #[test]
+    fn blank_ca_cert_is_ignored() {
+        let cfg = Config::parse_from([
+            "x",
+            "--llm",
+            "openai",
+            "--llm-url",
+            "https://h/v1",
+            "--llm-model",
+            "m",
+            "--llm-ca-cert",
+            "",
+        ]);
+        assert!(Summarizer::from_config(&cfg).unwrap().is_some());
     }
 
     #[test]

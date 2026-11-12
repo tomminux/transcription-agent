@@ -57,8 +57,10 @@ pub struct Config {
     pub llm_api_key: Option<String>,
 
     /// PEM file with the CA certificate of an intranet HTTPS server.
+    /// A String, not a PathBuf: compose passes an empty value when unset, and
+    /// clap rejects an empty path ("a value is required").
     #[arg(long, env = "TA_LLM_CA_CERT")]
-    pub llm_ca_cert: Option<PathBuf>,
+    pub llm_ca_cert: Option<String>,
 
     /// API key for `anthropic`.
     #[arg(long, env = "ANTHROPIC_API_KEY", hide_env_values = true)]
@@ -102,6 +104,13 @@ mod tests {
         assert_eq!(c.scan_interval_secs, 5);
         assert_eq!(c.language, "auto");
         assert_eq!(c.llm, "none");
+    }
+
+    #[test]
+    fn empty_ca_cert_means_unset() {
+        // `--llm-ca-cert ""` is what compose produces for an unset variable.
+        let c = Config::parse_from(["x", "--llm-ca-cert", ""]);
+        assert_eq!(c.llm_ca_cert.as_deref(), Some(""));
     }
 
     #[test]
