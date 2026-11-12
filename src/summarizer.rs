@@ -206,7 +206,21 @@ impl Summarizer {
             // The error body describes the problem and does not echo the transcript.
             bail!("LLM returned HTTP {status}: {}", truncate(&text, 500));
         }
-        let value: Value = serde_json::from_str(&text).context("LLM response is not JSON")?;
+        let value: Value = serde_json::from_str(&text).map_err(|_| {
+            if text
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("<!doctype html")
+                || text.trim_start().starts_with("<html")
+            {
+                anyhow::anyhow!(
+                    "got a web page instead of JSON: TA_LLM_URL points at a web UI, not at the \
+                     API (Open WebUI serves its API under /api, e.g. https://host/api)"
+                )
+            } else {
+                anyhow::anyhow!("LLM response is not JSON")
+            }
+        })?;
         match &self.provider {
             Provider::Anthropic { .. } => parse_anthropic(&value),
             Provider::Ollama => parse_ollama(&value),
@@ -488,6 +502,27 @@ mod tests {
         let req = h.join().unwrap().to_ascii_lowercase();
         assert!(req.starts_with("post /v1/chat/completions"));
         assert!(req.contains("authorization: bearer k123"));
+    }
+
+    #[test]
+    fn html_response_gives_a_hint() {
+        let (url, h) = fake_server(200, "<!doctype html><html></html>");
+        let cfg = Config::parse_from([
+            "x",
+            "--llm",
+            "openai",
+            "--llm-url",
+            &url,
+            "--llm-model",
+            "m",
+        ]);
+        let err = Summarizer::from_config(&cfg)
+            .unwrap()
+            .unwrap()
+            .summarize("t")
+            .unwrap_err();
+        h.join().unwrap();
+        assert!(format!("{err:#}").contains("web page instead of JSON"));
     }
 
     #[test]

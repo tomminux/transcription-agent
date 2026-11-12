@@ -175,12 +175,13 @@ are saved first, so an LLM failure only logs an error and never loses anything.
 At startup the agent also writes reports for existing transcriptions that have
 none (this is also how a failed one is retried: restart the container).
 
-**Private server on the intranet / VPN (OpenAI-compatible API: vLLM, LiteLLM,
-llama.cpp server, ...):**
+**Private server on the intranet / VPN (OpenAI-compatible API: Open WebUI, vLLM,
+LiteLLM, llama.cpp server, ...):**
 
 ```
 TA_LLM=openai
 TA_LLM_URL=https://llm.intranet/v1          # base URL; /chat/completions is appended
+                                            # Open WebUI: https://llm.intranet/api
 TA_LLM_MODEL=<model name the server exposes>
 TA_LLM_API_KEY=...                          # sent as "Authorization: Bearer ..."
 TA_LLM_CA_CERT=/models/intranet-ca.pem      # only if the server uses a private CA
@@ -194,6 +195,13 @@ same network namespace as the agent:
 ```
 podman run --rm docker.io/curlimages/curl -sS -H "Authorization: Bearer $KEY" https://llm.intranet/v1/models
 ```
+
+The answer must be JSON listing the models (use those names for `TA_LLM_MODEL`).
+If you get an HTML page (`<title>Open WebUI</title>`), the path is wrong: that
+is the web interface. **Open WebUI** serves the API under `/api`
+(`/api/models`, `/api/chat/completions`), so use `TA_LLM_URL=https://host/api`,
+and create the key in *Settings > Account > API keys* (an admin may need to
+enable API keys).
 
 A private CA certificate (PEM) can be put in the `models/` folder, which is
 already mounted at `/models`, and referenced by `TA_LLM_CA_CERT`. It replaces
