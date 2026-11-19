@@ -95,6 +95,11 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
+        tracing::info!(
+            file = %path.display(),
+            duration_secs = audio.duration_secs().round(),
+            "audio decoded, transcribing (long recordings take a while, no progress is logged)"
+        );
         let transcript = match transcriber.transcribe(&audio.samples, &shutdown) {
             Ok(Some(t)) => t,
             Ok(None) => {

@@ -66,22 +66,63 @@ fn decode_native(path: &Path) -> Result<DecodedAudio> {
 
 /// Decodes with the `ffmpeg` binary straight to 16 kHz mono f32 (raw, via a pipe).
 fn decode_ffmpeg(path: &Path) -> Result<Vec<f32>> {
-    let output = Command::new("ffmpeg")
+    decode_with_program("ffmpeg", path)
+}
+
+fn decode_with_program(program: &str, path: &Path) -> Result<Vec<f32>> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut child = Command::new(program)
         .args(["-nostdin", "-v", "error", "-i"])
         // "file:" keeps a path starting with "-" from being read as an option.
         .arg(format!("file:{}", path.display()))
         .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => anyhow!("ffmpeg is not installed"),
             _ => anyhow!("cannot run ffmpeg: {e}"),
         })?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        bail!("ffmpeg exited with {}: {}", output.status, err.trim());
+
+    // Drain stderr on a thread (a full pipe would block ffmpeg); keep a bounded tail.
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let err_thread = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = (&mut stderr).take(64 * 1024).read_to_string(&mut text);
+        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        text
+    });
+
+    // Stream stdout into the sample vector: holding the raw bytes AND the
+    // samples (what `Command::output` + a conversion did) doubled the memory,
+    // which gets multi-hour recordings killed in a small VM.
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let mut samples: Vec<f32> = Vec::new();
+    let mut buf = vec![0u8; 1 << 20];
+    let mut carry = 0usize; // bytes of an incomplete trailing frame
+    loop {
+        let n = stdout
+            .read(&mut buf[carry..])
+            .context("cannot read ffmpeg output")?;
+        if n == 0 {
+            break;
+        }
+        let filled = carry + n;
+        let (frames, rest) = buf[..filled].as_chunks::<4>();
+        samples.extend(frames.iter().map(|b| f32::from_le_bytes(*b)));
+        carry = rest.len();
+        let start = filled - carry;
+        buf.copy_within(start..filled, 0);
     }
-    let (frames, _rest) = output.stdout.as_chunks::<4>();
-    Ok(frames.iter().map(|b| f32::from_le_bytes(*b)).collect())
+    let status = child.wait().context("cannot wait for ffmpeg")?;
+    let err = err_thread.join().unwrap_or_default();
+    if !status.success() {
+        bail!("ffmpeg exited with {status}: {}", err.trim());
+    }
+    samples.shrink_to_fit();
+    Ok(samples)
 }
 
 /// Averages interleaved multi-channel samples into mono.
@@ -174,6 +215,52 @@ fn resample_mono(input: &[f32], from: u32, to: u32) -> Result<Vec<f32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn fake_ffmpeg(dir: &Path, body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join("fake-ffmpeg");
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ffmpeg_output_is_streamed_into_samples() {
+        let d = tempfile::tempdir().unwrap();
+        // 3,000,003 bytes: 750,000 whole f32 frames plus 3 stray bytes, larger
+        // than the 1 MiB read buffer so frames straddle chunk boundaries.
+        let prog = fake_ffmpeg(d.path(), "head -c 3000003 /dev/zero");
+        let got = decode_with_program(&prog, Path::new("x.m4a")).unwrap();
+        assert_eq!(got.len(), 750_000);
+        assert!(got.iter().all(|s| *s == 0.0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ffmpeg_frames_keep_their_values_across_chunks() {
+        let d = tempfile::tempdir().unwrap();
+        // 0x3f800000 = 1.0f32 little-endian = 00 00 80 3f, 400,000 times (1.6 MB)
+        let prog = fake_ffmpeg(
+            d.path(),
+            "yes 'a' | head -c 0 ; i=0; while [ $i -lt 100 ]; do printf '\\000\\000\\200\\077%.0s' $(seq 1 4000); i=$((i+1)); done",
+        );
+        let got = decode_with_program(&prog, Path::new("x.m4a")).unwrap();
+        assert_eq!(got.len(), 400_000);
+        assert!(got.iter().all(|s| *s == 1.0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ffmpeg_failure_reports_stderr() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake_ffmpeg(d.path(), "echo 'bad stream' >&2; exit 3");
+        let err = decode_with_program(&prog, Path::new("x.m4a")).unwrap_err();
+        assert!(format!("{err:#}").contains("bad stream"));
+        let missing = decode_with_program("/nonexistent/ffmpeg", Path::new("x")).unwrap_err();
+        assert!(format!("{missing:#}").contains("not installed"));
+    }
 
     /// Writes a 16-bit PCM WAV with a sine tone.
     fn write_wav(path: &Path, rate: u32, channels: u16, secs: f32, freq: f32) {

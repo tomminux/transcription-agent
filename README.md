@@ -40,6 +40,14 @@ Stop with `docker compose down` (the agent shuts down cleanly; a recording
 being transcribed stays in `new-audio-files/` and is picked up on the next
 start).
 
+Long recordings need memory: the whole decoded audio is held in RAM
+(about 230 MB per hour, up to roughly twice that while loading). A 3-hour
+file is fine with 4 GB for the VM, 6-8 hour files want 8 GB
+(`podman machine set --memory 8192`). If the container restarts in a loop on a
+long file and the log stops right after `trying ffmpeg`, it was killed for
+memory: check with
+`podman inspect <container> --format '{{.State.OOMKilled}} {{.RestartCount}}'`.
+
 Give Docker at least 2 CPUs and 2 GB RAM (`base` needs ~1 GB, `small` ~2 GB).
 On x86 the image needs a CPU with AVX2 (Intel Macs from 2013 on). On Apple
 Silicon it is a native arm64 build; do not force `--platform linux/amd64`
