@@ -33,7 +33,7 @@ docker compose logs -f
 ```
 
 Then drop a `.m4a` into
-`/Users/paolo/docker-host-containers/transcription-agent/new-audio-files/`.
+`$HOME/docker-host-containers/transcription-agent/new-audio-files/`.
 (Pass another folder to `scripts/setup.sh <dir>` to change it.)
 
 Stop with `docker compose down` (the agent shuts down cleanly; a recording
@@ -71,8 +71,8 @@ scripts/setup.sh --podman
 scripts/download-model.sh small    # `base` is faster but less accurate; `small` is a good fit for an M-series CPU
 ```
 
-The default `podman machine` shares your home folder (`/Users/paolo`) with the
-VM, so `/Users/paolo/docker-host-containers/transcription-agent` and the
+The default `podman machine` shares your home folder (`$HOME`) with the
+VM, so `$HOME/docker-host-containers/transcription-agent` and the
 repo's `models/` folder are visible to containers without extra options.
 
 Then start it, **either** with compose:
@@ -89,7 +89,7 @@ podman compose down                # stop
 ```bash
 podman build -t transcription-agent:local .
 
-DATA=/Users/paolo/docker-host-containers/transcription-agent
+DATA="$HOME/docker-host-containers/transcription-agent"
 podman run -d --name transcription-agent --restart unless-stopped --init \
   -v "$DATA":/data \
   -v "$PWD/models":/models:ro \

@@ -28,10 +28,16 @@ COPY Cargo.toml Cargo.lock ./
 RUN . /etc/ggml-env.sh \
     && mkdir src && echo 'fn main() {}' > src/main.rs \
     && cargo build --release \
-    && rm -rf src target/release/transcription-agent* target/release/deps/transcription_agent*
+    && rm -rf src target/release/transcription-agent* target/release/deps/transcription_agent* \
+              target/release/.fingerprint/transcription-agent-* target/release/incremental
 
 COPY src ./src
-RUN . /etc/ggml-env.sh && cargo build --release
+# Cargo decides what to rebuild by file mtimes. Sources copied from the host
+# can be OLDER than the dummy build above, so Cargo would keep the empty
+# `fn main() {}` binary (container starts, prints nothing, exits 0). The
+# fingerprint removal above and this touch guarantee the real build.
+RUN . /etc/ggml-env.sh && touch src/*.rs && cargo build --release \
+    && test "$(target/release/transcription-agent --version)" != "" 
 
 FROM debian:bookworm-slim AS runtime
 # ffmpeg: fallback decoder for AAC variants the built-in decoder rejects (HE-AAC, multichannel...).
