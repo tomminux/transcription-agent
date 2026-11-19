@@ -361,7 +361,23 @@ fn is_report(path: &Path) -> bool {
         .is_some_and(|s| s.to_string_lossy().ends_with("-report"))
 }
 
-/// Transcriptions in `dir` that have no report yet (oldest name first).
+/// True if the front matter of `path` has `report: requested`. Older files
+/// without the field never asked for a report, so they are left alone.
+fn report_requested(path: &Path) -> bool {
+    use std::io::{BufRead, BufReader};
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut lines = BufReader::new(file).lines().map_while(|l| l.ok());
+    if lines.next().as_deref() != Some("---") {
+        return false;
+    }
+    lines
+        .take_while(|l| l != "---")
+        .any(|l| l.trim() == "report: requested")
+}
+
+/// Transcriptions in `dir` that asked for a report and have none yet.
 pub fn missing_reports(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
         .into_iter()
@@ -375,6 +391,7 @@ pub fn missing_reports(dir: &Path) -> Vec<PathBuf> {
                     .file_name()
                     .is_some_and(|n| n.to_string_lossy().starts_with('.'))
                 && !report_path(p).exists()
+                && report_requested(p)
         })
         .collect();
     found.sort();
@@ -428,8 +445,18 @@ mod tests {
     #[test]
     fn missing_reports_skips_reports_hidden_and_done() {
         let dir = tempfile::tempdir().unwrap();
-        for n in ["a.md", "b.md", "b-report.md", ".tmp.md", "c.txt"] {
-            std::fs::write(dir.path().join(n), "x").unwrap();
+        let fm = |r: &str| format!("---\nsource: \"x\"\nreport: {r}\n---\n\nbody\n");
+        for (n, body) in [
+            ("a.md", fm("requested")),
+            ("b.md", fm("requested")),
+            ("b-report.md", "x".to_string()),
+            (".tmp.md", fm("requested")),
+            ("c.txt", fm("requested")),
+            ("skipped.md", fm("skipped")),
+            ("old.md", "---\nsource: \"x\"\n---\n".to_string()),
+            ("nofm.md", "report: requested\n".to_string()),
+        ] {
+            std::fs::write(dir.path().join(n), body).unwrap();
         }
         let got: Vec<_> = missing_reports(dir.path())
             .iter()

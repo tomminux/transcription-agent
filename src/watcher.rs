@@ -153,7 +153,10 @@ impl FailureTracker {
 /// Besides `notify` events, the folder is rescanned every `rescan_interval`
 /// (bind-mounted macOS folders often produce no events inside a container).
 /// The returned watcher must be kept alive for events to keep flowing.
-pub fn watch(dir: &Path, rescan_interval: Duration) -> Result<(RecommendedWatcher, FileQueue)> {
+pub fn watch(
+    dirs: &[PathBuf],
+    rescan_interval: Duration,
+) -> Result<(RecommendedWatcher, FileQueue)> {
     let (tx, rx) = mpsc::channel();
 
     let event_tx = tx.clone();
@@ -171,29 +174,35 @@ pub fn watch(dir: &Path, rescan_interval: Duration) -> Result<(RecommendedWatche
             Err(e) => tracing::warn!("watch error: {e}"),
         })
         .context("cannot create file watcher")?;
-    watcher
-        .watch(dir, RecursiveMode::NonRecursive)
-        .with_context(|| format!("cannot watch {}", dir.display()))?;
+    for dir in dirs {
+        watcher
+            .watch(dir, RecursiveMode::NonRecursive)
+            .with_context(|| format!("cannot watch {}", dir.display()))?;
+    }
 
     // Scan after the watcher is active so nothing is missed in between.
-    for path in scan_existing(dir)? {
-        let _ = tx.send(path);
+    for dir in dirs {
+        for path in scan_existing(dir)? {
+            let _ = tx.send(path);
+        }
     }
 
     // Periodic rescan; the queue de-duplicates. Ends when the queue is dropped.
-    let scan_dir = dir.to_path_buf();
+    let scan_dirs = dirs.to_vec();
     std::thread::spawn(move || {
         loop {
             sleep(rescan_interval);
-            match scan_existing(&scan_dir) {
-                Ok(files) => {
-                    for path in files {
-                        if tx.send(path).is_err() {
-                            return;
+            for dir in &scan_dirs {
+                match scan_existing(dir) {
+                    Ok(files) => {
+                        for path in files {
+                            if tx.send(path).is_err() {
+                                return;
+                            }
                         }
                     }
+                    Err(e) => tracing::warn!("rescan failed: {e:#}"),
                 }
-                Err(e) => tracing::warn!("rescan failed: {e:#}"),
             }
         }
     });
@@ -264,10 +273,30 @@ mod tests {
     }
 
     #[test]
+    fn watch_covers_several_folders() {
+        let d = tempfile::tempdir().unwrap();
+        let sub = d.path().join("with-report");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("s.m4a"), b"x").unwrap();
+        fs::write(d.path().join("r.m4a"), b"x").unwrap();
+        let (_w, mut q) = watch(
+            &[d.path().to_path_buf(), sub.clone()],
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let no = AtomicBool::new(false);
+        let mut got = vec![q.next(&no).unwrap(), q.next(&no).unwrap()];
+        got.sort();
+        assert_eq!(got, [d.path().join("r.m4a"), sub.join("s.m4a")]);
+        fs::write(sub.join("late.m4a"), b"x").unwrap();
+        assert_eq!(q.next(&no).unwrap(), sub.join("late.m4a"));
+    }
+
+    #[test]
     fn watch_reports_existing_and_new_files() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("old.m4a"), b"x").unwrap();
-        let (_w, mut q) = watch(d.path(), Duration::from_secs(60)).unwrap();
+        let (_w, mut q) = watch(&[d.path().to_path_buf()], Duration::from_secs(60)).unwrap();
         assert_eq!(
             q.next(&AtomicBool::new(false))
                 .unwrap()
@@ -290,7 +319,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         // Smoke test: the file is reported whether via an event or a rescan
         // tick (the two paths cannot be separated on a local filesystem).
-        let (_w, mut q) = watch(d.path(), Duration::from_millis(50)).unwrap();
+        let (_w, mut q) = watch(&[d.path().to_path_buf()], Duration::from_millis(50)).unwrap();
         fs::write(d.path().join("late.m4a"), b"x").unwrap();
         assert_eq!(
             q.next(&AtomicBool::new(false))

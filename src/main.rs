@@ -40,8 +40,14 @@ fn main() -> anyhow::Result<()> {
     );
 
     // Keep `_watcher` alive: dropping it stops the events.
+    let default_mode = output::ReportMode::parse_default(&config.llm_default)?;
+    let watched = [
+        config.input_dir.clone(),
+        config.input_dir.join(output::WITH_REPORT_DIR),
+        config.input_dir.join(output::TRANSCRIBE_ONLY_DIR),
+    ];
     let (_watcher, mut queue) = watcher::watch(
-        &config.input_dir,
+        &watched,
         Duration::from_secs(config.scan_interval_secs.max(1)),
     )?;
     tracing::info!(dir = %config.input_dir.display(), "watching for new audio files");
@@ -79,6 +85,7 @@ fn main() -> anyhow::Result<()> {
             tracing::debug!(file = %path.display(), "file disappeared, skipping");
             continue;
         }
+        let mode = output::ReportMode::for_path(&path, &config.input_dir, default_mode);
         let started = Instant::now();
         let audio = match decoder::decode_file(&path) {
             Ok(a) => a,
@@ -105,6 +112,7 @@ fn main() -> anyhow::Result<()> {
             recorded_at: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
             duration_secs: audio.duration_secs(),
             model: &model_name,
+            report: mode,
         };
         match output::store_result(
             &path,
@@ -127,8 +135,14 @@ fn main() -> anyhow::Result<()> {
                 chars = transcript.text().chars().count(),
                 "transcribed and moved"
                 );
-                if let Some(s) = &summarizer {
-                    report(s, &md);
+                if mode == output::ReportMode::Requested {
+                    match &summarizer {
+                        Some(s) => report(s, &md),
+                        None => tracing::warn!(
+                            transcription = %md.display(),
+                            "report requested but TA_LLM is none; it will be written at a later start with an LLM configured"
+                        ),
+                    }
                 }
             }
             Err(e) => {

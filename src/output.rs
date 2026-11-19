@@ -15,6 +15,52 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use crate::transcriber::{Segment, Transcript};
 
 /// Metadata written to the front matter of the Markdown file.
+/// Subfolders of the input folder that choose what happens to a file.
+pub const WITH_REPORT_DIR: &str = "with-report";
+pub const TRANSCRIBE_ONLY_DIR: &str = "transcribe-only";
+
+/// Whether an AI meeting report is wanted for a recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportMode {
+    Requested,
+    Skipped,
+}
+
+impl ReportMode {
+    /// Value written to the front matter (`report: ...`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Requested => "requested",
+            Self::Skipped => "skipped",
+        }
+    }
+
+    /// Parses `TA_LLM_DEFAULT`: `report` or `none`.
+    pub fn parse_default(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "none" | "transcribe-only" | "off" => Ok(Self::Skipped),
+            "report" | "with-report" | "on" => Ok(Self::Requested),
+            other => Err(anyhow!(
+                "unknown TA_LLM_DEFAULT {other:?} (use report or none)"
+            )),
+        }
+    }
+
+    /// Mode for an audio file: its folder under `input_dir` decides, files
+    /// directly in `input_dir` get `default`.
+    pub fn for_path(path: &Path, input_dir: &Path, default: Self) -> Self {
+        match path
+            .parent()
+            .and_then(|p| p.strip_prefix(input_dir).ok())
+            .and_then(|rel| rel.to_str())
+        {
+            Some(WITH_REPORT_DIR) => Self::Requested,
+            Some(TRANSCRIBE_ONLY_DIR) => Self::Skipped,
+            _ => default,
+        }
+    }
+}
+
 pub struct Meta<'a> {
     /// Original audio file name.
     pub source_name: &'a str,
@@ -23,6 +69,8 @@ pub struct Meta<'a> {
     pub duration_secs: f64,
     /// Model file name, e.g. `ggml-base.bin`.
     pub model: &'a str,
+    /// Whether the user asked for an AI report (decides the startup backfill).
+    pub report: ReportMode,
 }
 
 /// Quotes a string as a YAML double-quoted scalar (safe for any content).
@@ -81,6 +129,7 @@ pub fn render_markdown(meta: &Meta, transcript: &Transcript, transcribed_at: Sys
     s.push_str(&format!("duration_seconds: {:.1}\n", meta.duration_secs));
     s.push_str(&format!("language: {}\n", yaml_quote(&transcript.language)));
     s.push_str(&format!("model: {}\n", yaml_quote(meta.model)));
+    s.push_str(&format!("report: {}\n", meta.report.as_str()));
     s.push_str("---\n\n");
     for seg in &transcript.segments {
         s.push_str(&format_segment(seg));
@@ -196,12 +245,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn report_mode_from_folder_and_default() {
+        let root = Path::new("/in");
+        let d = ReportMode::Skipped;
+        let m = |p: &str, def| ReportMode::for_path(Path::new(p), root, def);
+        assert_eq!(m("/in/a.m4a", d), ReportMode::Skipped);
+        assert_eq!(m("/in/a.m4a", ReportMode::Requested), ReportMode::Requested);
+        assert_eq!(m("/in/with-report/a.m4a", d), ReportMode::Requested);
+        assert_eq!(
+            m("/in/transcribe-only/a.m4a", ReportMode::Requested),
+            ReportMode::Skipped
+        );
+        assert_eq!(m("/in/other/a.m4a", d), d);
+        assert_eq!(
+            ReportMode::parse_default("report").unwrap(),
+            ReportMode::Requested
+        );
+        assert_eq!(
+            ReportMode::parse_default("none").unwrap(),
+            ReportMode::Skipped
+        );
+        assert!(ReportMode::parse_default("x").is_err());
+    }
+
+    #[test]
+    fn front_matter_records_report_choice() {
+        let md = render_markdown(&meta("a.m4a"), &transcript("hi"), SystemTime::UNIX_EPOCH);
+        assert!(md.contains("\nreport: requested\n---\n"));
+    }
+
     fn meta(name: &str) -> Meta<'_> {
         Meta {
             source_name: name,
             recorded_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
             duration_secs: 12.34,
             model: "ggml-base.bin",
+            report: ReportMode::Requested,
         }
     }
 
@@ -224,7 +304,7 @@ mod tests {
             md,
             "---\nsource: \"a b.m4a\"\nrecorded_at: 2023-11-14T22:13:20Z\n\
              transcribed_at: 2023-11-14T22:15:00Z\nduration_seconds: 12.3\n\
-             language: \"it\"\nmodel: \"ggml-base.bin\"\n---\n\n[00:00:00 - 00:00:12] Ciao mondo\n"
+             language: \"it\"\nmodel: \"ggml-base.bin\"\nreport: requested\n---\n\n[00:00:00 - 00:00:12] Ciao mondo\n"
         );
     }
 

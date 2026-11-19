@@ -43,6 +43,12 @@ pub struct Config {
     #[arg(long, env = "TA_LLM", default_value = "none")]
     pub llm: String,
 
+    /// What to do with files placed directly in the input folder: `report`
+    /// (transcription + AI report) or `none` (transcription only). Files in
+    /// `with-report/` or `transcribe-only/` ignore this.
+    #[arg(long, env = "TA_LLM_DEFAULT", default_value = "none")]
+    pub llm_default: String,
+
     /// Model name (anthropic default: claude-opus-5-5; ollama: required).
     #[arg(long, env = "TA_LLM_MODEL")]
     pub llm_model: Option<String>,
@@ -83,7 +89,15 @@ impl Config {
     /// Creates the three working folders if they do not exist yet.
     pub fn ensure_dirs(&self) -> anyhow::Result<()> {
         use anyhow::Context;
-        for dir in [&self.input_dir, &self.output_dir, &self.done_dir] {
+        let with_report = self.input_dir.join(crate::output::WITH_REPORT_DIR);
+        let only = self.input_dir.join(crate::output::TRANSCRIBE_ONLY_DIR);
+        for dir in [
+            &self.input_dir,
+            &with_report,
+            &only,
+            &self.output_dir,
+            &self.done_dir,
+        ] {
             std::fs::create_dir_all(dir)
                 .with_context(|| format!("cannot create directory {}", dir.display()))?;
         }

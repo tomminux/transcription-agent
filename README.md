@@ -145,6 +145,7 @@ Environment variables (set in `.env`) or CLI flags:
 | `TA_SCAN_INTERVAL_SECS` | `5` | How often the input folder is rescanned |
 | `RUST_LOG` | `info` | Log level |
 | `TA_LLM` | `none` | Meeting report backend: `none`, `openai` (private server), `ollama`, `anthropic` |
+| `TA_LLM_DEFAULT` | `none` | For files in the root of `new-audio-files/`: `none` or `report` |
 | `TA_LLM_MODEL` | `claude-opus-5-5` (anthropic) | Model name (required for ollama) |
 | `TA_LLM_URL` | per backend | Ollama default `http://host.containers.internal:11434` |
 | `TA_LLM_NUM_CTX` | `32768` | Ollama context window |
@@ -166,6 +167,23 @@ To use another model: `scripts/download-model.sh small`, then set
 `TA_MODEL=/models/ggml-small.bin` in `.env`.
 
 ## Meeting reports (optional)
+
+**Choosing per recording.** Drop each audio file in the folder that says what
+you want:
+
+```
+new-audio-files/
+  (file here)       -> what TA_LLM_DEFAULT says (default: transcription only)
+  transcribe-only/  -> transcription only, never sent to the LLM
+  with-report/      -> transcription + AI report
+```
+
+The agent creates the two subfolders at startup. The choice is written in the
+transcription's front matter as `report: requested` or `report: skipped`. At
+startup the agent writes missing reports **only** for `report: requested`;
+transcriptions made before this feature (no `report:` field) or marked
+`skipped` are never sent to the LLM. If you want a report for one of them later,
+add `report: requested` to its front matter and restart the container.
 
 With an LLM enabled, each new transcription also gets a report,
 `transcriptions/<name>-report.md`: summary, participants (a best guess, the

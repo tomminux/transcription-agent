@@ -32,6 +32,7 @@ HOST_MODELS_DIR=$root/models
 # TA_SCAN_INTERVAL_SECS=5
 # RUST_LOG=info
 # Meeting report from each transcription (off by default):
+# TA_LLM_DEFAULT=none      # files dropped in new-audio-files/ itself: none (transcription only) or report
 # TA_LLM=openai            # private OpenAI-compatible server (intranet/VPN)
 # TA_LLM_URL=https://llm.intranet/v1
 # TA_LLM_MODEL=<model name the server exposes>
