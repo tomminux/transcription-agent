@@ -138,7 +138,7 @@ Environment variables (set in `.env`) or CLI flags:
 
 | Variable | Default (container) | Meaning |
 |---|---|---|
-| `HOST_DATA_DIR` | `/Users/paolo/docker-host-containers/transcription-agent` | Host folder holding the three subfolders (mounted at `/data`) |
+| `HOST_DATA_DIR` | `$HOME/docker-host-containers/transcription-agent` | Host folder holding the three subfolders (mounted at `/data`) |
 | `HOST_MODELS_DIR` | `./models` | Host folder with the ggml models (mounted read-only at `/models`) |
 | `TA_MODEL` | `/models/ggml-base.bin` | Model file (e.g. `ggml-small.bin` for better accuracy) |
 | `TA_LANGUAGE` | `auto` | Spoken language: `auto`, one code (`it`), or a list (`it,en`) to detect only among those |

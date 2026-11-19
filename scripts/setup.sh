@@ -3,7 +3,7 @@
 # files it writes to the mounted folders belong to you. Safe to re-run.
 #
 # Usage: scripts/setup.sh [--podman] [data-dir]
-#   data-dir  defaults to /Users/paolo/docker-host-containers/transcription-agent
+#   data-dir  defaults to $HOME/docker-host-containers/transcription-agent
 #   --podman  rootless Podman (macOS): run as container "root" (uid 0), which
 #             Podman maps to your own user, so files in the mounted folders end
 #             up owned by you. With Docker the container runs as your uid/gid.
@@ -11,7 +11,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 podman=false
-data_dir="/Users/paolo/docker-host-containers/transcription-agent"
+data_dir="$HOME/docker-host-containers/transcription-agent"
 for arg in "$@"; do
   case "$arg" in
     --podman) podman=true ;;
