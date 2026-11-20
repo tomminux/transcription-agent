@@ -154,6 +154,7 @@ Environment variables (set in `.env`) or CLI flags:
 | `RUST_LOG` | `info` | Log level |
 | `TA_LLM` | `none` | Meeting report backend: `none`, `openai` (private server), `ollama`, `anthropic` |
 | `TA_LLM_DEFAULT` | `none` | For files in the root of `new-audio-files/`: `none` or `report` |
+| `TA_REPORT_SCAN_INTERVAL_SECS` | `30` | How often to look for `report: requested` transcriptions without a report (`0` = startup only) |
 | `TA_LLM_MODEL` | `claude-opus-5-5` (anthropic) | Model name (required for ollama) |
 | `TA_LLM_URL` | per backend | Ollama default `http://host.containers.internal:11434` |
 | `TA_LLM_NUM_CTX` | `32768` | Ollama context window |
@@ -188,10 +189,14 @@ new-audio-files/
 
 The agent creates the two subfolders at startup. The choice is written in the
 transcription's front matter as `report: requested` or `report: skipped`. At
-startup the agent writes missing reports **only** for `report: requested`;
-transcriptions made before this feature (no `report:` field) or marked
-`skipped` are never sent to the LLM. If you want a report for one of them later,
-add `report: requested` to its front matter and restart the container.
+startup, and then every `TA_REPORT_SCAN_INTERVAL_SECS` (default 30 s), the agent
+writes missing reports **only** for `report: requested`; transcriptions made
+before this feature (no `report:` field) or marked `skipped` are never sent to
+the LLM. To get a report for one of them later, change its front matter to
+`report: requested`: it is picked up within the interval, no restart needed
+(`0` disables the periodic check, leaving only the startup one). A report that
+failed is retried only after the transcription file changes (e.g. save it
+again), so a broken LLM does not cause a retry storm.
 
 With an LLM enabled, each new transcription also gets a report,
 `transcriptions/<name>-report.md`: summary, participants (a best guess, the

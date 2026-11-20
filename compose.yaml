@@ -17,6 +17,7 @@ services:
       # Meeting report (off by default). See README "Meeting reports".
       TA_LLM: "${TA_LLM:-none}"
       TA_LLM_DEFAULT: "${TA_LLM_DEFAULT:-none}"
+      TA_REPORT_SCAN_INTERVAL_SECS: "${TA_REPORT_SCAN_INTERVAL_SECS:-30}"
       TA_LLM_MODEL: "${TA_LLM_MODEL:-}"
       TA_LLM_URL: "${TA_LLM_URL:-}"
       TA_LLM_API_KEY: "${TA_LLM_API_KEY:-}"

@@ -57,15 +57,15 @@ fn main() -> anyhow::Result<()> {
     let summarizer = summarizer::Summarizer::from_config(&config)?;
     if let Some(s) = &summarizer {
         tracing::info!(llm = %s.describe(), "meeting reports enabled");
-        // Backfill: transcriptions without a report (older files, or an LLM
-        // failure last time). A failure is logged and not retried until restart.
-        for md in summarizer::missing_reports(&config.output_dir) {
-            if shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-            report(s, &md);
-        }
     }
+    // Transcriptions that asked for a report and have none (also covers files
+    // edited to `report: requested`). Runs at startup and then periodically.
+    let mut report_failures = watcher::FailureTracker::default();
+    let report_every = Duration::from_secs(config.report_scan_interval_secs);
+    if let Some(s) = &summarizer {
+        backfill_reports(s, &config.output_dir, &mut report_failures, &shutdown);
+    }
+    let mut last_report_scan = Instant::now();
 
     let model_name = config
         .model
@@ -73,7 +73,21 @@ fn main() -> anyhow::Result<()> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    while let Some(path) = queue.next(&shutdown) {
+    loop {
+        let path = match queue.next_within(&shutdown, Duration::from_secs(1)) {
+            watcher::Wait::File(p) => p,
+            watcher::Wait::Idle => {
+                if let Some(s) = &summarizer
+                    && !report_every.is_zero()
+                    && last_report_scan.elapsed() >= report_every
+                {
+                    backfill_reports(s, &config.output_dir, &mut report_failures, &shutdown);
+                    last_report_scan = Instant::now();
+                }
+                continue;
+            }
+            watcher::Wait::Stop => break,
+        };
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -142,7 +156,9 @@ fn main() -> anyhow::Result<()> {
                 );
                 if mode == output::ReportMode::Requested {
                     match &summarizer {
-                        Some(s) => report(s, &md),
+                        Some(s) => {
+                            report(s, &md);
+                        }
                         None => tracing::warn!(
                             transcription = %md.display(),
                             "report requested but TA_LLM is none; it will be written at a later start with an LLM configured"
@@ -164,17 +180,46 @@ fn main() -> anyhow::Result<()> {
 
 /// Writes the report for one transcription; failures are logged only (the
 /// transcription and the audio are already safe).
-fn report(summarizer: &summarizer::Summarizer, transcription: &std::path::Path) {
+/// Returns whether the report was written.
+fn report(summarizer: &summarizer::Summarizer, transcription: &std::path::Path) -> bool {
     let started = Instant::now();
     match summarizer::write_report(summarizer, transcription) {
-        Ok(path) => tracing::info!(
-            report = %path.display(),
-            elapsed_secs = started.elapsed().as_secs_f64().round(),
-            "meeting report written"
-        ),
-        Err(e) => tracing::error!(
-            transcription = %transcription.display(),
-            "meeting report failed: {e:#}"
-        ),
+        Ok(path) => {
+            tracing::info!(
+                report = %path.display(),
+                elapsed_secs = started.elapsed().as_secs_f64().round(),
+                "meeting report written"
+            );
+            true
+        }
+        Err(e) => {
+            tracing::error!(
+                transcription = %transcription.display(),
+                "meeting report failed: {e:#}"
+            );
+            false
+        }
+    }
+}
+
+/// Writes the reports that were asked for (`report: requested`) and are
+/// missing. A failed one is retried only after its transcription file changes
+/// (same rule as failed audio), so a broken LLM does not cause a retry storm.
+fn backfill_reports(
+    summarizer: &summarizer::Summarizer,
+    output_dir: &std::path::Path,
+    failures: &mut watcher::FailureTracker,
+    shutdown: &AtomicBool,
+) {
+    for md in summarizer::missing_reports(output_dir) {
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+        if failures.should_skip(&md) {
+            continue;
+        }
+        if !report(summarizer, &md) {
+            failures.record(&md);
+        }
     }
 }

@@ -76,6 +76,11 @@ pub struct Config {
     #[arg(long, env = "TA_LLM_NUM_CTX", default_value_t = 32768)]
     pub llm_num_ctx: u32,
 
+    /// Seconds between checks for transcriptions whose front matter says
+    /// `report: requested` but that have no report yet (0 = only at startup).
+    #[arg(long, env = "TA_REPORT_SCAN_INTERVAL_SECS", default_value_t = 30)]
+    pub report_scan_interval_secs: u64,
+
     /// Timeout for one LLM request, in seconds.
     #[arg(long, env = "TA_LLM_TIMEOUT_SECS", default_value_t = 900)]
     pub llm_timeout_secs: u64,

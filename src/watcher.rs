@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread::sleep;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -70,6 +70,16 @@ pub fn wait_until_stable(
     }
 }
 
+/// Result of waiting for the next file.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Wait {
+    File(PathBuf),
+    /// Nothing arrived within the allowed time.
+    Idle,
+    /// Shutdown requested, or the producer is gone.
+    Stop,
+}
+
 /// De-duplicating FIFO of paths fed by a channel.
 pub struct FileQueue {
     rx: Receiver<PathBuf>,
@@ -95,22 +105,40 @@ impl FileQueue {
     /// Next path to process, blocking until one arrives.
     /// Returns `None` when `shutdown` is set, or when the sender side is gone
     /// and the queue is empty.
+    #[cfg(test)]
     pub fn next(&mut self, shutdown: &AtomicBool) -> Option<PathBuf> {
         loop {
+            match self.next_within(shutdown, Duration::from_secs(3600)) {
+                Wait::File(p) => return Some(p),
+                Wait::Idle => {}
+                Wait::Stop => return None,
+            }
+        }
+    }
+
+    /// Like `next`, but gives control back as `Wait::Idle` after `max_wait`
+    /// without a file, so the caller can do periodic work.
+    pub fn next_within(&mut self, shutdown: &AtomicBool, max_wait: Duration) -> Wait {
+        let deadline = Instant::now() + max_wait;
+        loop {
             if shutdown.load(Ordering::Relaxed) {
-                return None;
+                return Wait::Stop;
             }
             while let Ok(p) = self.rx.try_recv() {
                 self.push(p);
             }
             if let Some(path) = self.queue.pop_front() {
                 self.queued.remove(&path);
-                return Some(path);
+                return Wait::File(path);
             }
-            match self.rx.recv_timeout(Duration::from_millis(200)) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Wait::Idle;
+            }
+            match self.rx.recv_timeout(left.min(Duration::from_millis(200))) {
                 Ok(p) => self.push(p),
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Disconnected) => return Wait::Stop,
             }
         }
     }
@@ -342,6 +370,25 @@ mod tests {
         fs::write(&f, b"longer content").unwrap();
         assert!(!t.should_skip(&f));
         assert!(!t.should_skip(&d.path().join("never-failed.m4a")));
+    }
+
+    #[test]
+    fn next_within_goes_idle_then_returns_files_and_stops() {
+        let (tx, rx) = mpsc::channel();
+        let mut q = FileQueue::new(rx);
+        let no = AtomicBool::new(false);
+        assert_eq!(q.next_within(&no, Duration::from_millis(50)), Wait::Idle);
+        tx.send(PathBuf::from("a")).unwrap();
+        assert_eq!(
+            q.next_within(&no, Duration::from_millis(50)),
+            Wait::File("a".into())
+        );
+        assert_eq!(
+            q.next_within(&AtomicBool::new(true), Duration::from_millis(50)),
+            Wait::Stop
+        );
+        drop(tx);
+        assert_eq!(q.next_within(&no, Duration::from_millis(50)), Wait::Stop);
     }
 
     #[test]
