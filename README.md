@@ -303,3 +303,7 @@ Building outside Docker needs `cmake`, a C++ compiler and `clang`/`libclang`
 
 Your recordings and transcriptions are private: they are gitignored and never
 leave your machine.
+
+## License
+
+[MIT-0](LICENSE): do whatever you want, no attribution required.

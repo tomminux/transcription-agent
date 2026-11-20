@@ -9,3 +9,10 @@
 !/transcriptions/.gitkeep
 !/transcribed-audio-files/.gitkeep
 .DS_Store
+
+# Never commit audio or generated reports, wherever they end up
+*.m4a
+*.wav
+*.mp3
+*.flac
+*-report.md
